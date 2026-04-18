@@ -1,0 +1,153 @@
+TM921 Example Intents Inventory
+Generated from the TM921 materials in ./TM921
+Date: 2026-04-10
+
+Scope
+- This file lists explicit intent examples or intent-shaped payloads found in the TM921 materials.
+- "Concrete example" means a named or semantically populated example, not just a schema placeholder.
+- Sources reviewed:
+  - TMF921_Intent_Management_v5.0.0.oas.yaml
+  - TMF921_Intent_Management.postman_collection.json.zip
+  - TMF921_Intent_Management_v5.0.0_specification.pdf
+  - TMF921_Intent_Management_v5.0.0_conformance.pdf
+  - tmf921-v5.0.0-ri-1.0.0.zip
+  - tmf921-v5.0.0-ctk-1.0.0.zip
+
+Source: TMF921_Intent_Management_v5.0.0.oas.yaml
+
+1. EventLiveBroadcast
+- Type: Intent
+- Nature: concrete create/list/retrieve example
+- Summary: intent for ordering live broadcast service for an event
+- Key traits:
+  - description: "Intent for ordering live broadcast service for an event"
+  - context: "Autonomous services"
+  - priority: 1
+  - validFor: 2023-10-23 to 2024-10-19
+  - intentSpecification: EventLiveBroadcast_IntentSpec
+  - expression type: JsonLdExpression
+  - semantic content: delivery, property, and reporting expectations for service/application delivery and quality
+- OAS locations:
+  - request example: line 5335, key `Intent_create_example_01_request`
+  - created response example: line 5438, key `Intent_create_example_01_response`
+  - list example: line 4308, key `Intent_list_example_response`
+  - retrieve example: line 4574, key `Intent_retrieve_example_response`
+
+2. probeIntentExample
+- Type: ProbeIntent
+- Nature: concrete create/retrieve example
+- Summary: probe intent resource using a Turtle expression for slice connectivity ordering
+- Key traits:
+  - description: "A probe intent resource"
+  - name: `probeIntentExample`
+  - version: 1.0
+  - expression IRI: `https://mycsp.com:8080/tmf-api/rdfs/turtleExpression-example-1`
+  - semantic content: Turtle/RDF intent headed by `idan:R1_PSE_Res_Slice_Intent1`
+  - embedded comment: "Intent for ordering connectivity via slice"
+- OAS locations:
+  - request example: line 5547, key `Intent_create_example_11_request`
+  - created response example: line 5662, key `Intent_create_example_11_response`
+  - retrieve example: line 4683, key `ProbeIntent_retrieve_example_response`
+
+3. ProbeIntent patch/update example
+- Type: ProbeIntent
+- Nature: partial update example rather than full standalone intent
+- Summary: patch that updates a ProbeIntent validity window
+- Key traits:
+  - description: "A ProbeIntent resource update example"
+  - @type: ProbeIntent
+  - validFor updated to 2024-04-30 through 2026-04-30
+- OAS locations:
+  - line 6306, key `ProbeIntent_Update_-_Patch_Merge_Default__request`
+  - line 6408, key `ProbeIntent_Update_-_Patch_Merge_request`
+
+4. MyIntent Report
+- Type: IntentReport referencing an Intent
+- Nature: intent-adjacent reporting example
+- Summary: report related to Intent 20011, whose nested target intent is EventLiveBroadcast
+- Key traits:
+  - report name: `MyIntent Report`
+  - report expression target: Intent 20011
+  - nested intent: EventLiveBroadcast
+- OAS locations:
+  - line 4777, key `IntentReport_list_example_response`
+  - line 5130, key `IntentReport_retrieve_example_response`
+
+5. MyIntent Report 2
+- Type: IntentReport referencing an Intent
+- Nature: second report example
+- Summary: another intent report example in the list response set
+- Key traits:
+  - report name: `MyIntent Report 2`
+  - report description: "Another Intent report example"
+  - appears in the multi-item report list example
+- OAS location:
+  - line 4777, within `IntentReport_list_example_response`
+
+6. MyProbeIntent Report
+- Type: IntentReport referencing a ProbeIntent
+- Nature: probe-intent reporting example
+- Summary: report tied to the ProbeIntent scenario
+- Key traits:
+  - report name: `MyProbeIntent Report`
+  - report description: "A ProbeIntent report example"
+  - nested target is a ProbeIntent-flavored scenario
+- OAS location:
+  - line 4777, within `IntentReport_list_example_response`
+
+Source: TMF921_Intent_Management.postman_collection.json.zip
+
+7. Generic "Creates a Intent" request body
+- Type: schema-shaped placeholder payload
+- Nature: generic template, not a concrete named intent
+- Summary: a POST body skeleton for creating an Intent with placeholders such as `<string>`, `<dateTime>`, and nested `intentSpecification`, `intentRelationship`, and other structures
+- Collection request name: `Creates a Intent`
+- Observed item order in collection traversal: request 10
+
+8. Generic "Updates partially a Intent" request body
+- Type: schema-shaped placeholder payload
+- Nature: generic template, not a concrete named intent
+- Summary: a PATCH body skeleton for updating an Intent with placeholder values
+- Collection request name: `Updates partially a Intent`
+- Observed item order in collection traversal: request 4
+
+Notes on the Postman source
+- The Postman collection appears to be generated largely from schema templates.
+- It does not provide additional concrete named intents beyond the richer examples already present in the OAS.
+
+Source: TMF921_Intent_Management_v5.0.0_specification.pdf
+
+Findings
+- No distinct additional intent examples were extracted beyond the examples already embedded in the OAS.
+- In this environment there was no dedicated PDF text extraction tool installed, and a low-level stream scan did not reveal clean new example payloads beyond what is already represented in the OpenAPI examples.
+- Practical conclusion: treat the OAS examples as the authoritative concrete examples for TM921 intent payloads.
+
+Source: TMF921_Intent_Management_v5.0.0_conformance.pdf
+
+Findings
+- No concrete intent payload examples identified.
+- The conformance document is primarily about required resources, operations, and mandatory attributes rather than business-semantic example intents.
+
+Source: tmf921-v5.0.0-ri-1.0.0.zip
+
+Findings
+- No explicit example intents found.
+- The RI zip only contains launcher/readme assets in this package, not sample intent payload files.
+
+Source: tmf921-v5.0.0-ctk-1.0.0.zip
+
+Findings
+- No explicit business-semantic example intents found in the packaged zip itself.
+- The CTK package is test harness infrastructure. Its generated fixtures focus on API conformance and placeholder mandatory-key checks, not on new named intent scenarios.
+
+Shortest useful summary
+- Concrete named TM921 intent examples found:
+  - EventLiveBroadcast
+  - probeIntentExample
+- Intent-adjacent report examples found:
+  - MyIntent Report
+  - MyIntent Report 2
+  - MyProbeIntent Report
+- Additional generic templates found:
+  - Creates a Intent
+  - Updates partially a Intent

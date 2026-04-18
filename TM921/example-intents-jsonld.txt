@@ -1,0 +1,99 @@
+TM921 JSON-LD Intent Examples
+Generated from the TM921 materials in ./TM921
+Date: 2026-04-11
+
+Scope
+- This file lists TM921 examples that use `JsonLdExpression`.
+- Turtle-based ProbeIntent examples are intentionally excluded here.
+- Primary source: `TM921/TMF921_Intent_Management_v5.0.0.oas.yaml`
+
+1. EventLiveBroadcast
+- Resource type: Intent
+- Expression type: JsonLdExpression
+- Source examples:
+  - `Intent_create_example_01_request` at line 5335
+  - `Intent_create_example_01_response` at line 5438
+  - `Intent_retrieve_example_response` at line 4574
+  - `Intent_list_example_response` at line 4308
+- Human summary:
+  - Intent for ordering live broadcast service for an event
+  - Context: Autonomous services
+  - Priority: 1
+  - Validity window: 2023-10-23T00:30:00.00Z to 2024-10-19T23:30:00.00Z
+  - Intent specification: `EventLiveBroadcast_IntentSpec`
+- JSON-LD expression details:
+  - IRI: `https://mycsp.com:8080/tmf-api/rdfs/expression-example-1`
+  - Root node: `idan:EventLiveBroadcast000001`
+  - Intent owner: `idan:Salesforce`
+  - Expectations encoded in JSON-LD:
+    - `idan:Delivery_service`
+    - `idan:Delivery_app`
+    - `idan:Property_service`
+    - `idan:Property_app`
+    - `idan:Reporting`
+  - Property examples encoded:
+    - service quality: `4KUHD`
+    - number of participants: at most `200`
+    - area of service defined as geographic points
+    - app types include `AWS MediaLive`, `Facebook Live`, `YouTube`
+  - Reporting examples encoded:
+    - reporting interval of 10 minutes
+    - reporting events include `icm:StateComplies` and `icm:StateDegrades`
+
+2. MyIntent Report
+- Resource type: IntentReport
+- Expression type: JsonLdExpression
+- Source examples:
+  - `IntentReport_list_example_response` at line 4777
+  - `IntentReport_retrieve_example_response` at line 5130
+- Human summary:
+  - Report about Intent `20011`
+  - Report name: `MyIntent Report`
+  - Nested target intent is `EventLiveBroadcast`
+- JSON-LD expression details:
+  - IRI: `https://mycsp.com:8080/tmf-api/rdfs/expression-intentReport-1`
+  - Uses `@graph`
+  - Captures:
+    - report timestamp
+    - report name
+    - report description
+    - target intent id `20011`
+
+3. MyIntent Report 2
+- Resource type: IntentReport
+- Expression type: JsonLdExpression
+- Source example:
+  - `IntentReport_list_example_response` at line 4777
+- Human summary:
+  - Second report entry in the list example
+  - Report name: `MyIntent Report 2`
+  - Description: `Another Intent report example`
+- Notes:
+  - Appears as another JSON-LD report instance in the list response set
+
+4. MyProbeIntent Report
+- Resource type: IntentReport
+- Expression type: JsonLdExpression
+- Source example:
+  - `IntentReport_list_example_response` at line 4777
+- Human summary:
+  - Report for a ProbeIntent scenario
+  - Report name: `MyProbeIntent Report`
+  - Description: `A ProbeIntent report example`
+- Notes:
+  - The report expression itself is JSON-LD even though the associated ProbeIntent example elsewhere uses Turtle
+
+Not Included
+- `probeIntentExample`
+  - Reason: its expression is Turtle, not JSON-LD
+  - Relevant OAS examples:
+    - `Intent_create_example_11_request`
+    - `Intent_create_example_11_response`
+    - `ProbeIntent_retrieve_example_response`
+
+Short summary
+- JSON-LD TM921 examples found:
+  - `EventLiveBroadcast`
+  - `MyIntent Report`
+  - `MyIntent Report 2`
+  - `MyProbeIntent Report`
