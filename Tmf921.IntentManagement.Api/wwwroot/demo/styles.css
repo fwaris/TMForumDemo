@@ -1,0 +1,336 @@
+:root {
+  --bg: #f3ecde;
+  --panel: rgba(255, 251, 245, 0.82);
+  --panel-strong: rgba(255, 248, 239, 0.96);
+  --ink: #1f2430;
+  --muted: #6c675d;
+  --line: rgba(82, 60, 34, 0.15);
+  --accent: #a24b2a;
+  --accent-soft: rgba(162, 75, 42, 0.12);
+  --success: #216e4a;
+  --success-soft: rgba(33, 110, 74, 0.12);
+  --danger: #a12633;
+  --danger-soft: rgba(161, 38, 51, 0.12);
+  --shadow: 0 24px 70px rgba(80, 52, 18, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(255, 222, 173, 0.7), transparent 34%),
+    radial-gradient(circle at top right, rgba(217, 167, 106, 0.5), transparent 30%),
+    linear-gradient(180deg, #faf2e3 0%, #efe2ca 56%, #ead7b7 100%);
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.page-shell {
+  width: min(1380px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 36px 0 48px;
+}
+
+.hero,
+.scenario-card {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.hero {
+  padding: 32px;
+  overflow: hidden;
+}
+
+.hero::after,
+.scenario-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -5% -40% auto;
+  width: 240px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(162, 75, 42, 0.15), transparent 66%);
+  pointer-events: none;
+}
+
+.eyebrow,
+.scenario-kicker {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h1 {
+  max-width: 13ch;
+  font-size: clamp(2.6rem, 6vw, 4.8rem);
+  line-height: 0.96;
+}
+
+.hero-copy {
+  max-width: 70ch;
+  margin: 16px 0 0;
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.hero-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  font-size: 0.95rem;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status-dot.ok {
+  background: var(--success);
+  box-shadow: 0 0 0 8px rgba(33, 110, 74, 0.12);
+}
+
+.status-dot.fail {
+  background: var(--danger);
+  box-shadow: 0 0 0 8px rgba(161, 38, 51, 0.12);
+}
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.scenario-card {
+  padding: 22px;
+}
+
+.scenario-header,
+.scenario-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.scenario-title {
+  margin-top: 2px;
+  font-size: 1.55rem;
+}
+
+.scenario-badge {
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.scenario-label {
+  display: block;
+  margin-top: 18px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.scenario-input {
+  width: 100%;
+  margin-top: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(82, 60, 34, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 253, 249, 0.95);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.scenario-input:focus,
+.run-button:focus {
+  outline: 2px solid rgba(162, 75, 42, 0.28);
+  outline-offset: 2px;
+}
+
+.scenario-actions {
+  margin-top: 14px;
+}
+
+.run-button {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 18px;
+  color: #fffaf4;
+  background: linear-gradient(135deg, #a24b2a 0%, #6b2f1e 100%);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+  box-shadow: 0 16px 30px rgba(107, 47, 30, 0.2);
+}
+
+.run-button:hover {
+  transform: translateY(-1px);
+}
+
+.run-button:disabled {
+  cursor: progress;
+  opacity: 0.72;
+  transform: none;
+}
+
+.run-state {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.result-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.summary-strip {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.summary-strip.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.summary-strip.failure {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.result-block {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-strong);
+}
+
+.result-block h3 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+.tm-summary,
+.provider-summary {
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.issue-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.issue-list li + li {
+  margin-top: 8px;
+}
+
+.code-frame {
+  margin: 0;
+  min-height: 120px;
+  max-height: 340px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 14px;
+  background: #1e1f23;
+  color: #f4ebdb;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reference-panel {
+  margin-top: 14px;
+  border: 1px dashed rgba(82, 60, 34, 0.26);
+  border-radius: 16px;
+  background: rgba(255, 251, 245, 0.72);
+}
+
+.reference-panel summary {
+  cursor: pointer;
+  padding: 14px 16px;
+  color: var(--muted);
+}
+
+.reference-panel .code-frame {
+  margin: 0 14px 14px;
+}
+
+@media (max-width: 1120px) {
+  .scenario-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    width: min(100vw - 18px, 1380px);
+    padding-top: 18px;
+  }
+
+  .hero,
+  .scenario-card {
+    border-radius: 20px;
+  }
+
+  .hero,
+  .scenario-card {
+    padding: 20px;
+  }
+
+  .scenario-header,
+  .scenario-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scenario-badge {
+    white-space: normal;
+  }
+}

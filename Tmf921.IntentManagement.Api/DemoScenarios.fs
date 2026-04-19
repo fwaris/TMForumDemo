@@ -6,6 +6,8 @@ open System.IO
 open System.Text.RegularExpressions
 
 module DemoScenarios =
+    open System.Text.Json
+
     type DemoExpectedOutcome =
         | DemoAccept
         | DemoRejectTm
@@ -284,6 +286,21 @@ module DemoScenarios =
             FStarFile = Some "BroadcastProviderDemo.FailTm.fst"
             FStarExpectedSuccess = Some false } ]
 
+    let featuredScenarioIds =
+        [ "broadcast_success_01"
+          "broadcast_fail_latency_01"
+          "broadcast_fail_tm_01" ]
+
+    let tryFindScenario id =
+        scenarios |> List.tryFind (fun scenario -> scenario.Id = id)
+
+    let featuredScenarios =
+        featuredScenarioIds |> List.choose tryFindScenario
+
+    let tryReadFStarSource fileName =
+        let filePath = Path.Combine(fstarDemoDir (), fileName)
+        if File.Exists filePath then Some (File.ReadAllText filePath) else None
+
     let private finalOutcome (expected: DemoExpectedOutcome) (tmIssues: ValidationIssue list) (providerDecision: DemoProviderDecision) =
         match expected with
         | DemoAccept when tmIssues.IsEmpty && providerDecision.Checks.IsEmpty -> "accepted"
@@ -317,6 +334,53 @@ module DemoScenarios =
             | Some decision -> finalOutcome definition.ExpectedOutcome tmIssues decision
             | None -> if tmIssues.IsEmpty then "accepted" else "rejected_tm"
           FStarCase = fstarResult }
+
+    let validateText (text: string) : DemoScenarioResult =
+        let normalized = parseTextIntent text
+        let tmIssues = validateTmIntent normalized
+        let providerDecision =
+            if tmIssues.IsEmpty then Some (validateProviderIntent normalized) else None
+
+        let providerAccepted = providerDecision |> Option.map (fun decision -> decision.Checks.IsEmpty)
+        let finalOutcome =
+            if not tmIssues.IsEmpty then
+                "rejected_tm"
+            else
+                match providerDecision with
+                | Some decision when not decision.Checks.IsEmpty -> "rejected_provider"
+                | _ -> "accepted"
+
+        { Id = "ad_hoc"
+          Text = text
+          TmAccepted = tmIssues.IsEmpty
+          TmIssues = tmIssues
+          NormalizedIntent = if tmIssues.IsEmpty then Some normalized else None
+          ProviderAccepted = providerAccepted
+          ProviderDecision = providerDecision
+          FinalOutcome = finalOutcome
+          FStarCase = None }
+
+    let buildNaturalLanguageRequest (text: string) : IntentFvo =
+        let expressionValue = JsonDocument.Parse(JsonSerializer.Serialize(text)).RootElement.Clone()
+
+        { Name = "demoIntent"
+          Expression =
+            { Iri = "urn:tmf921:demo:nl"
+              ExpressionValue = expressionValue
+              Type = Some "NaturalLanguageExpression"
+              BaseType = None
+              SchemaLocation = None }
+          Description = Some "Natural-language validation request from the demo page."
+          ValidFor = None
+          IsBundle = None
+          Priority = Some "1"
+          Context = Some "Live broadcast service"
+          Version = Some "1.0"
+          IntentSpecification = None
+          LifecycleStatus = Some "acknowledged"
+          Type = Some "Intent"
+          BaseType = None
+          SchemaLocation = None }
 
     let runAll () =
         scenarios |> List.map runScenario

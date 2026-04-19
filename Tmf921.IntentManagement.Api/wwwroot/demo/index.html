@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TMF921 Demo Scenarios</title>
+  <link rel="stylesheet" href="/demo/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <p class="eyebrow">TMF921 Intent Management Demo</p>
+      <h1>Validate natural-language broadcast intents and inspect the resulting F*</h1>
+      <p class="hero-copy">
+        Each scenario sends its statement to the backend, runs TM normalization and provider checks,
+        and then displays the generated F* module when the shell can produce one.
+      </p>
+      <div class="hero-status">
+        <span class="status-dot" id="api-status-dot"></span>
+        <span id="api-status-text">Checking API health...</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="scenario-grid" id="scenario-grid" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <template id="scenario-template">
+    <article class="scenario-card">
+      <div class="scenario-header">
+        <div>
+          <p class="scenario-kicker"></p>
+          <h2 class="scenario-title"></h2>
+        </div>
+        <span class="scenario-badge"></span>
+      </div>
+
+      <label class="scenario-label">
+        Natural-language statement
+        <textarea class="scenario-input" rows="7"></textarea>
+      </label>
+
+      <div class="scenario-actions">
+        <button class="run-button" type="button">Validate</button>
+        <span class="run-state">Ready</span>
+      </div>
+
+      <section class="result-panel">
+        <div class="summary-strip"></div>
+        <div class="result-grid">
+          <div class="result-block">
+            <h3>TM Validation</h3>
+            <div class="tm-summary"></div>
+            <ul class="issue-list tm-issues"></ul>
+          </div>
+          <div class="result-block">
+            <h3>Provider Validation</h3>
+            <div class="provider-summary"></div>
+            <ul class="issue-list provider-issues"></ul>
+          </div>
+          <div class="result-block">
+            <h3>Normalized Intent</h3>
+            <pre class="code-frame normalized-json"></pre>
+          </div>
+          <div class="result-block">
+            <h3>Generated F*</h3>
+            <pre class="code-frame generated-fstar"></pre>
+          </div>
+        </div>
+        <details class="reference-panel">
+          <summary>Reference demo F* case</summary>
+          <pre class="code-frame reference-fstar"></pre>
+        </details>
+      </section>
+    </article>
+  </template>
+
+  <script src="/demo/app.js"></script>
+</body>
+</html>

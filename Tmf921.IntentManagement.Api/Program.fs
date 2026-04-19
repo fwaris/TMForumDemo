@@ -1,5 +1,6 @@
 namespace Tmf921.IntentManagement.Api
 open System
+open System.IO
 open System.Text.Json
 open System.Text.Json.Serialization
 open System.Threading.Tasks
@@ -45,10 +46,15 @@ module Program =
                 context.Request.Path <- Microsoft.AspNetCore.Http.PathString(rewritten)
                 next.Invoke(context))) |> ignore
 
+            app.UseDefaultFiles() |> ignore
+            app.UseStaticFiles() |> ignore
             app.UseAuthorization() |> ignore
             app.MapControllers() |> ignore
 
+            let demoPagePath = Path.Combine(app.Environment.WebRootPath, "demo", "index.html")
+
             app.MapGet("/", Func<string>(fun () -> "TMF921 Intent Management shell API")) |> ignore
+            app.MapGet("/demo", Func<IResult>(fun () -> Results.File(demoPagePath, "text/html; charset=utf-8"))) |> ignore
             app.MapGet("/health", Func<obj>(fun () -> {| status = "ok"; api = "TMF921"; version = "v5"; mode = "shell" |})) |> ignore
 
             app.Run()
