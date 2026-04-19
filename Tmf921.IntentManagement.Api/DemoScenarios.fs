@@ -2,6 +2,7 @@ namespace Tmf921.IntentManagement.Api
 
 open System
 open System.Diagnostics
+open System.Globalization
 open System.IO
 open System.Text.RegularExpressions
 
@@ -63,6 +64,7 @@ module DemoScenarios =
           NormalizedIntent: DemoTmIntent option
           ProviderAccepted: bool option
           ProviderDecision: DemoProviderDecision option
+          ProviderFStarModule: string option
           FinalOutcome: string
           FStarCase: DemoFStarCaseResult option }
 
@@ -254,6 +256,78 @@ module DemoScenarios =
             |> List.filter (String.IsNullOrWhiteSpace >> not)
             |> String.concat "\n" }
 
+    let private fstarString (value: string) =
+        value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\r", "")
+            .Replace("\n", "\\n")
+
+    let private renderOptionString (value: string option) =
+        match value with
+        | Some text -> $"Some \"{fstarString text}\""
+        | None -> "None"
+
+    let private renderOptionNat (value: int option) =
+        match value with
+        | Some number when number >= 0 -> $"Some {number}"
+        | _ -> "None"
+
+    let private renderVenueOption (venue: string option) =
+        match venue with
+        | Some "Detroit Stadium" -> Some "Some DetroitStadium"
+        | Some "Metro Arena" -> Some "Some MetroArena"
+        | _ -> None
+
+    let private sanitizeModuleSegment (value: string) =
+        let sanitized = Regex.Replace(value, "[^A-Za-z0-9_]", "")
+        if String.IsNullOrWhiteSpace sanitized then "Intent" else sanitized
+
+    let private renderProviderIntentRecord (intentName: string) (intent: DemoTmIntent) =
+        let monthText, dayValue, yearValue =
+            match intent.EventDate with
+            | Some date ->
+                Some (date.ToString("MMMM", CultureInfo.InvariantCulture)), Some date.Day, Some date.Year
+            | None -> None, None, None
+
+        $"""let {intentName} : tm_intent =
+  {{ intent_name = "{fstarString intent.IntentName}";
+    venue = {renderVenueOption intent.Venue |> Option.defaultValue "None"};
+    service_class = {renderOptionString intent.ServiceClass};
+    event_month = {renderOptionString monthText};
+    event_day = {renderOptionNat dayValue};
+    event_year = {renderOptionNat yearValue};
+    start_hour = {renderOptionNat intent.StartHour};
+    end_hour = {renderOptionNat intent.EndHour};
+    timezone = {renderOptionString intent.Timezone};
+    device_count = {renderOptionNat intent.DeviceCount};
+    max_uplink_latency_ms = {renderOptionNat intent.MaxUplinkLatencyMs};
+    reporting_interval_minutes = {renderOptionNat intent.ReportingIntervalMinutes};
+    immediate_degradation_alerts = {string intent.ImmediateDegradationAlerts |> fun value -> value.ToLowerInvariant()};
+    preserve_emergency_traffic = {string intent.PreserveEmergencyTraffic |> fun value -> value.ToLowerInvariant()};
+    request_public_safety_preemption = {string intent.RequestsPublicSafetyPreemption |> fun value -> value.ToLowerInvariant()} }}"""
+
+    let private buildProviderFStarModule (intent: DemoTmIntent) =
+        match renderVenueOption intent.Venue with
+        | None -> None
+        | Some _ ->
+            let moduleName = $"BroadcastProviderDemo.GeneratedProvider{sanitizeModuleSegment intent.IntentName}"
+            let intentBindingName = "demo_intent"
+
+            Some
+                $"""module {moduleName}
+
+open BroadcastProviderDemo
+
+{renderProviderIntentRecord intentBindingName intent}
+
+let tm_checked : tm_checked_intent {intentBindingName} =
+  mk_tm_checked {intentBindingName}
+
+let provider_checked : provider_checked_intent {intentBindingName} =
+  mk_provider_checked {intentBindingName}
+"""
+
     let scenarios =
         [ { Id = "broadcast_success_01"
             Text = "Provide a premium 5G broadcast service for the live event at Detroit Stadium on April 25, 2026 from 18:00 to 22:00 America/Detroit. Support up to 200 production devices. Keep uplink latency under 20 ms. Send hourly compliance updates and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
@@ -329,6 +403,7 @@ module DemoScenarios =
           NormalizedIntent = if tmIssues.IsEmpty then Some normalized else None
           ProviderAccepted = providerAccepted
           ProviderDecision = providerDecision
+          ProviderFStarModule = if tmIssues.IsEmpty then buildProviderFStarModule normalized else None
           FinalOutcome =
             match providerDecision with
             | Some decision -> finalOutcome definition.ExpectedOutcome tmIssues decision
@@ -357,6 +432,7 @@ module DemoScenarios =
           NormalizedIntent = if tmIssues.IsEmpty then Some normalized else None
           ProviderAccepted = providerAccepted
           ProviderDecision = providerDecision
+          ProviderFStarModule = if tmIssues.IsEmpty then buildProviderFStarModule normalized else None
           FinalOutcome = finalOutcome
           FStarCase = None }
 

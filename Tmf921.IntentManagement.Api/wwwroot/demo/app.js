@@ -22,19 +22,60 @@ const expectedLabels = {
   DemoRejectTm: "Expected TM rejection"
 };
 
-const grid = document.getElementById("scenario-grid");
-const template = document.getElementById("scenario-template");
+function firstElement(...selectors) {
+  for (const selector of selectors) {
+    if (!selector) {
+      continue;
+    }
+
+    const byId = selector.startsWith("#") ? document.getElementById(selector.slice(1)) : null;
+    const element = byId || document.querySelector(selector);
+    if (element) {
+      return element;
+    }
+  }
+
+  return null;
+}
+
+const scenarioSelect = firstElement("#scenario-select", ".scenario-select");
+const scenarioInput = firstElement("#scenario-input", ".scenario-input");
+const runButton = firstElement("#run-button", ".run-button");
+const runState = firstElement("#run-state", ".run-state");
+const summaryStrip = firstElement("#summary-strip", ".summary-strip");
+const tmSummary = firstElement("#tm-summary", ".tm-summary");
+const providerSummary = firstElement("#provider-summary", ".provider-summary");
+const tmIssues = firstElement("#tm-issues", ".tm-issues", ".issue-list.tm-issues");
+const providerIssues = firstElement("#provider-issues", ".provider-issues", ".issue-list.provider-issues");
+const generatedTmFstar = firstElement("#generated-tm-fstar", "#generated-fstar", ".generated-fstar");
+const generatedProviderFstar = firstElement("#generated-provider-fstar");
+const normalizedJson = firstElement("#normalized-json", ".normalized-json");
+const referenceFstar = firstElement("#reference-fstar", ".reference-fstar");
+const scenarioKicker = firstElement("#scenario-kicker", ".scenario-kicker");
+const scenarioTitle = firstElement("#scenario-title", ".scenario-title");
+const scenarioBadge = firstElement("#scenario-badge", ".scenario-badge");
+
+let scenariosById = new Map();
 
 function formatJson(value) {
   return value ? JSON.stringify(value, null, 2) : "No normalized structure was produced.";
 }
 
 function setText(element, text) {
+  if (!element) {
+    return;
+  }
+
   element.textContent = text;
 }
 
 function renderIssues(listElement, issues) {
+  if (!listElement) {
+    return;
+  }
+
   listElement.replaceChildren();
+
   if (!issues || issues.length === 0) {
     const item = document.createElement("li");
     item.textContent = "No issues.";
@@ -62,7 +103,7 @@ function outcomeLabel(finalOutcome) {
   }
 }
 
-function generatedFStarText(result) {
+function generatedTmFStarText(result) {
   if (result.pipeline?.checkedFStarModule) {
     return result.pipeline.checkedFStarModule;
   }
@@ -77,23 +118,69 @@ function generatedFStarText(result) {
   return "No checked F* module was produced for this input.";
 }
 
-function applyResult(card, result) {
-  const summary = card.querySelector(".summary-strip");
-  const tmSummary = card.querySelector(".tm-summary");
-  const providerSummary = card.querySelector(".provider-summary");
-  const normalizedJson = card.querySelector(".normalized-json");
-  const generatedFstar = card.querySelector(".generated-fstar");
-  const referenceFstar = card.querySelector(".reference-fstar");
+function generatedProviderFStarText(result) {
+  if (result.validation.providerFStarModule) {
+    return result.validation.providerFStarModule;
+  }
 
-  summary.className = "summary-strip";
-  if (result.validation.finalOutcome === "accepted") {
-    summary.classList.add("success");
-  } else {
-    summary.classList.add("failure");
+  const providerAccepted = result.validation.providerAccepted;
+  if (providerAccepted === null || providerAccepted === undefined) {
+    return "Provider F* was not generated because provider validation did not run.";
+  }
+
+  if (!result.validation.providerDecision?.selectedProfile) {
+    return "Provider F* was not generated because the normalized intent could not be mapped to a supported provider profile.";
+  }
+
+  return "No provider F* module was produced for this input.";
+}
+
+function selectedScenario() {
+  if (!scenarioSelect) {
+    return null;
+  }
+
+  return scenariosById.get(scenarioSelect.value);
+}
+
+function updateScenarioDetails() {
+  const scenario = selectedScenario();
+  if (!scenario) {
+    return;
+  }
+
+  setText(scenarioKicker, scenarioKickers[scenario.id] || "Scenario");
+  setText(scenarioTitle, scenarioTitles[scenario.id] || scenario.id);
+  setText(scenarioBadge, expectedLabels[scenario.expectedOutcome] || scenario.expectedOutcome);
+  if (scenarioInput) {
+    scenarioInput.value = scenario.text;
+  }
+  setText(summaryStrip, "Press Validate to send the statement to the backend.");
+  if (summaryStrip) {
+    summaryStrip.className = "summary-strip";
+  }
+  setText(tmSummary, "");
+  setText(providerSummary, "");
+  setText(generatedTmFstar, "");
+  setText(generatedProviderFstar, "");
+  setText(normalizedJson, "");
+  setText(referenceFstar, "");
+  tmIssues.replaceChildren();
+  providerIssues.replaceChildren();
+}
+
+function applyResult(result) {
+  if (summaryStrip) {
+    summaryStrip.className = "summary-strip";
+    if (result.validation.finalOutcome === "accepted") {
+      summaryStrip.classList.add("success");
+    } else {
+      summaryStrip.classList.add("failure");
+    }
   }
 
   setText(
-    summary,
+    summaryStrip,
     `${outcomeLabel(result.validation.finalOutcome)}. ${result.scenario.expectedMessage}`
   );
 
@@ -114,18 +201,22 @@ function applyResult(card, result) {
         : `Provider rejected the request${result.validation.providerDecision?.selectedProfile ? ` for ${result.validation.providerDecision.selectedProfile}` : ""}.`
   );
 
-  renderIssues(card.querySelector(".tm-issues"), result.validation.tmIssues || []);
-  renderIssues(card.querySelector(".provider-issues"), result.validation.providerDecision?.checks || []);
+  renderIssues(tmIssues, result.validation.tmIssues || []);
+  renderIssues(providerIssues, result.validation.providerDecision?.checks || []);
+  setText(generatedTmFstar, generatedTmFStarText(result));
+  setText(generatedProviderFstar, generatedProviderFStarText(result));
   setText(normalizedJson, formatJson(result.validation.normalizedIntent));
-  setText(generatedFstar, generatedFStarText(result));
   setText(referenceFstar, result.scenario.referenceFStar || "No reference F* file is attached to this scenario.");
 }
 
-async function validateScenario(card, scenarioId, text) {
-  const button = card.querySelector(".run-button");
-  const state = card.querySelector(".run-state");
-  button.disabled = true;
-  setText(state, "Running backend validation...");
+async function validateScenario() {
+  const scenario = selectedScenario();
+  if (!scenario) {
+    return;
+  }
+
+  runButton.disabled = true;
+  setText(runState, "Running backend validation...");
 
   try {
     const response = await fetch("/tmf-api/intentManagement/v5/demo/validate", {
@@ -133,7 +224,10 @@ async function validateScenario(card, scenarioId, text) {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ scenarioId, text })
+      body: JSON.stringify({
+        scenarioId: scenario.id,
+        text: scenarioInput?.value || scenario.text
+      })
     });
 
     if (!response.ok) {
@@ -141,34 +235,19 @@ async function validateScenario(card, scenarioId, text) {
     }
 
     const result = await response.json();
-    applyResult(card, result);
-    setText(state, "Validation complete");
+    applyResult(result);
+    setText(runState, "Validation complete");
   } catch (error) {
-    const summary = card.querySelector(".summary-strip");
-    summary.className = "summary-strip failure";
-    setText(summary, `Validation request failed. ${error.message}`);
-    setText(state, "Backend request failed");
+    if (summaryStrip) {
+      summaryStrip.className = "summary-strip failure";
+    }
+    setText(summaryStrip, `Validation request failed. ${error.message}`);
+    setText(runState, "Backend request failed");
   } finally {
-    button.disabled = false;
+    if (runButton) {
+      runButton.disabled = false;
+    }
   }
-}
-
-function buildCard(scenario) {
-  const fragment = template.content.cloneNode(true);
-  const card = fragment.querySelector(".scenario-card");
-  const input = fragment.querySelector(".scenario-input");
-  const button = fragment.querySelector(".run-button");
-
-  setText(fragment.querySelector(".scenario-kicker"), scenarioKickers[scenario.id] || "Scenario");
-  setText(fragment.querySelector(".scenario-title"), scenarioTitles[scenario.id] || scenario.id);
-  setText(
-    fragment.querySelector(".scenario-badge"),
-    expectedLabels[scenario.expectedOutcome] || scenario.expectedOutcome
-  );
-  input.value = scenario.text;
-
-  button.addEventListener("click", () => validateScenario(card, scenario.id, input.value));
-  return fragment;
 }
 
 async function loadHealth() {
@@ -201,26 +280,32 @@ async function loadScenarios() {
     .map((id) => scenarios.find((scenario) => scenario.id === id))
     .filter(Boolean);
 
+  scenariosById = new Map(ordered.map((scenario) => [scenario.id, scenario]));
+
   ordered.forEach((scenario) => {
-    grid.appendChild(buildCard(scenario));
+    const option = document.createElement("option");
+    option.value = scenario.id;
+    option.textContent = scenarioTitles[scenario.id] || scenario.id;
+    scenarioSelect?.appendChild(option);
   });
 
-  document.querySelectorAll(".scenario-card").forEach((card) => {
-    const button = card.querySelector(".run-button");
-    button.click();
-  });
+  if (ordered.length > 0 && scenarioSelect) {
+    scenarioSelect.value = ordered[0].id;
+    updateScenarioDetails();
+  }
 }
 
 async function bootstrap() {
+  runButton?.addEventListener("click", validateScenario);
+  scenarioSelect?.addEventListener("change", updateScenarioDetails);
+
   await loadHealth();
 
   try {
     await loadScenarios();
   } catch (error) {
-    const fallback = document.createElement("article");
-    fallback.className = "scenario-card";
-    fallback.innerHTML = `<p>Unable to load demo scenarios. ${error.message}</p>`;
-    grid.appendChild(fallback);
+    summaryStrip.className = "summary-strip failure";
+    setText(summaryStrip, `Unable to load demo scenarios. ${error.message}`);
   }
 }
 

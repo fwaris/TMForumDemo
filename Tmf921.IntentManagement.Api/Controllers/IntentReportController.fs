@@ -7,8 +7,8 @@ open Microsoft.AspNetCore.Mvc
 open Tmf921.IntentManagement.Api
 
 [<ApiController>]
-[<Route("tmf-api/intentManagement/v5/intent/{intentId}/intentReport")>]
-type IntentReportController(shellStore: ShellStore, intentStore: IIntentStore) =
+[<Route(ApiRouteTemplates.IntentReportCollection)>]
+type IntentReportController(shellStore: ShellStore) =
     inherit ControllerBase()
 
     let normalizeIntentId (intentId: string) (fallbackId: string) =
@@ -19,10 +19,7 @@ type IntentReportController(shellStore: ShellStore, intentStore: IIntentStore) =
 
     let key (intentId: string) (id: string) = $"{intentId}:{id}"
 
-    let basePath (c: ControllerBase) intentId =
-        $"{c.Request.Scheme}://{c.Request.Host}{c.Request.PathBase}/tmf-api/intentManagement/v5/intent/{intentId}/intentReport"
-
-    let sampleIntentReport (_intentId: string) (reportId: string) (reportHref: string) (_intentHref: string) =
+    let sampleIntentReport (_intentId: string) (reportId: string) (reportHref: string) =
         let report = JsonObject()
         let expression = JsonObject()
 
@@ -42,9 +39,19 @@ type IntentReportController(shellStore: ShellStore, intentStore: IIntentStore) =
         shellStore.IntentReports.GetOrAdd(
             key intentId reportId,
             Func<string, JsonObject>(fun _ ->
-                let reportHref = href (basePath controller intentId) reportId
-                let intentHref = $"{controller.Request.Scheme}://{controller.Request.Host}{controller.Request.PathBase}/tmf-api/intentManagement/v5/intent/{intentId}"
-                sampleIntentReport intentId reportId reportHref intentHref))
+                let routeValues =
+                    ApiLinks.routeValues
+                        [ "intentId", box intentId
+                          "id", box reportId ]
+
+                let reportHref =
+                    ApiLinks.linkOrPath
+                        controller
+                        ApiRouteNames.IntentReportGetById
+                        routeValues
+                        (ApiRoutePaths.intentReportItem intentId reportId)
+
+                sampleIntentReport intentId reportId reportHref))
 
     [<HttpGet>]
     member this.List(intentId: string, [<FromQuery>] fields: string, [<FromQuery>] offset: string, [<FromQuery>] limit: string) : IActionResult =
@@ -58,7 +65,7 @@ type IntentReportController(shellStore: ShellStore, intentStore: IIntentStore) =
         |> selectFields fields
         |> this.Ok :> IActionResult
 
-    [<HttpGet("{id}")>]
+    [<HttpGet("{id}", Name = ApiRouteNames.IntentReportGetById)>]
     member this.Get(intentId: string, id: string, [<FromQuery>] fields: string) : IActionResult =
         let intentId = normalizeIntentId intentId id
         match shellStore.IntentReports.TryGetValue(key intentId id) with

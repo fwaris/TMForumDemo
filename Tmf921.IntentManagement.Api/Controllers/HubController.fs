@@ -7,12 +7,9 @@ open Microsoft.AspNetCore.Mvc
 open Tmf921.IntentManagement.Api
 
 [<ApiController>]
-[<Route("tmf-api/intentManagement/v5/hub")>]
+[<Route(ApiRouteTemplates.HubCollection)>]
 type HubController(shellStore: ShellStore) =
     inherit ControllerBase()
-
-    let basePath (c: ControllerBase) =
-        $"{c.Request.Scheme}://{c.Request.Host}{c.Request.PathBase}/tmf-api/intentManagement/v5/hub"
 
     let getTypeOrDefault (body: JsonObject) fallback =
         match body["@type"] with
@@ -22,12 +19,13 @@ type HubController(shellStore: ShellStore) =
     [<HttpPost>]
     member this.Create([<FromBody>] payload: JsonElement) : IActionResult =
         let id = Guid.NewGuid().ToString("N")
+        let resourceHref = ApiLinks.fromCurrentCollection this id
         let body = ensureObject payload
         body["id"] <- JsonValue.Create(id)
-        body["href"] <- JsonValue.Create(href (basePath this) id)
+        body["href"] <- JsonValue.Create(resourceHref)
         body["@type"] <- JsonValue.Create(getTypeOrDefault body "Hub")
         shellStore.Hubs[id] <- body
-        this.Response.Headers.Location <- href (basePath this) id
+        this.Response.Headers.Location <- resourceHref
         this.StatusCode(201, body) :> IActionResult
 
     [<HttpDelete("{id}")>]

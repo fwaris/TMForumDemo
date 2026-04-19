@@ -7,22 +7,19 @@ open Microsoft.AspNetCore.Mvc
 open Tmf921.IntentManagement.Api
 
 [<ApiController>]
-[<Route("tmf-api/intentManagement/v5/intentSpecification")>]
+[<Route(ApiRouteTemplates.IntentSpecificationCollection)>]
 type IntentSpecificationController(shellStore: ShellStore) =
     inherit ControllerBase()
-
-    let basePath (c: ControllerBase) =
-        $"{c.Request.Scheme}://{c.Request.Host}{c.Request.PathBase}/tmf-api/intentManagement/v5/intentSpecification"
 
     let getTypeOrDefault (body: JsonObject) fallback =
         match body["@type"] with
         | null -> fallback
         | value -> value.GetValue<string>()
 
-    let upsert (controller: ControllerBase) (id: string) (payload: JsonElement) =
+    let upsert (resourceHref: string) (id: string) (payload: JsonElement) =
         let body = ensureObject payload
         body["id"] <- JsonValue.Create(id)
-        body["href"] <- JsonValue.Create(href (basePath controller) id)
+        body["href"] <- JsonValue.Create(resourceHref)
         body["@type"] <- JsonValue.Create(getTypeOrDefault body "IntentSpecification")
         body["lastUpdate"] <- JsonValue.Create(nowText())
         shellStore.IntentSpecifications[id] <- body
@@ -32,7 +29,7 @@ type IntentSpecificationController(shellStore: ShellStore) =
     member this.List([<FromQuery>] fields: string, [<FromQuery>] offset: string, [<FromQuery>] limit: string) : IActionResult =
         shellStore.IntentSpecifications.Values |> Seq.toList |> selectFields fields |> this.Ok :> IActionResult
 
-    [<HttpGet("{id}")>]
+    [<HttpGet("{id}", Name = ApiRouteNames.IntentSpecificationGetById)>]
     member this.Get(id: string, [<FromQuery>] fields: string) : IActionResult =
         match shellStore.IntentSpecifications.TryGetValue id with
         | true, value -> this.Ok(value) :> IActionResult
@@ -41,14 +38,20 @@ type IntentSpecificationController(shellStore: ShellStore) =
     [<HttpPost>]
     member this.Create([<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : IActionResult =
         let id = Guid.NewGuid().ToString("N")
-        let body = upsert this id payload
-        this.Response.Headers.Location <- href (basePath this) id
-        this.StatusCode(201, selectFields fields body) :> IActionResult
+        let routeValues = ApiLinks.routeValues [ "id", box id ]
+        let resourceHref =
+            ApiLinks.linkOrPath this ApiRouteNames.IntentSpecificationGetById routeValues (ApiRoutePaths.intentSpecificationItem id)
+        let body = upsert resourceHref id payload
+        this.CreatedAtRoute(ApiRouteNames.IntentSpecificationGetById, routeValues, selectFields fields body) :> IActionResult
 
     [<HttpPatch("{id}")>]
     member this.Patch(id: string, [<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : IActionResult =
         match shellStore.IntentSpecifications.TryGetValue id with
-        | true, _ -> upsert this id payload |> selectFields fields |> this.Ok :> IActionResult
+        | true, _ ->
+            let routeValues = ApiLinks.routeValues [ "id", box id ]
+            let resourceHref =
+                ApiLinks.linkOrPath this ApiRouteNames.IntentSpecificationGetById routeValues (ApiRoutePaths.intentSpecificationItem id)
+            upsert resourceHref id payload |> selectFields fields |> this.Ok :> IActionResult
         | _ -> this.NotFound() :> IActionResult
 
     [<HttpDelete("{id}")>]

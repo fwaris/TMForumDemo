@@ -3,13 +3,12 @@ namespace Tmf921.IntentManagement.Api.Controllers
 open System
 open System.Text.Json
 open System.Text.Json.Nodes
-open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Mvc
 open Microsoft.Extensions.Logging
 open Tmf921.IntentManagement.Api
 
 [<ApiController>]
-[<Route("tmf-api/intentManagement/v5/intent")>]
+[<Route(ApiRouteTemplates.IntentCollection)>]
 type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogger<IntentController>) =
     inherit ControllerBase()
 
@@ -24,9 +23,6 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
           Reason = "No matching intent exists."
           Message = $"Intent '{id}' was not found."
           Status = "404" }
-
-    let toHref (controller: ControllerBase) id =
-        $"{controller.Request.Scheme}://{controller.Request.Host}{controller.Request.PathBase}/tmf-api/intentManagement/v5/intent/{id}"
 
     let parseIntOrDefault raw fallback =
         if String.IsNullOrWhiteSpace raw then fallback
@@ -114,9 +110,9 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
           BaseType = nodeString body "@baseType"
           SchemaLocation = nodeString body "@schemaLocation" }
 
-    let toResource (controller: ControllerBase) id now (request: IntentFvo) =
+    let toResource href id now (request: IntentFvo) =
         { Id = id
-          Href = toHref controller id
+          Href = href
           Name = request.Name
           Expression = Domain.normalizeExpression request.Expression
           Description = request.Description
@@ -164,7 +160,7 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
 
         base.Ok(selectFields fields result) :> IActionResult
 
-    [<HttpGet("{id}")>]
+    [<HttpGet("{id}", Name = ApiRouteNames.IntentGetById)>]
     member this.Get(id: string, [<FromQuery>] fields: string) : IActionResult =
         match store.TryGet id with
         | Some intent -> base.Ok(intent) :> IActionResult
@@ -180,15 +176,17 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
     member this.Create([<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : IActionResult =
         let request = requestFromJson payload
         let id = Guid.NewGuid().ToString("N")
+        let routeValues = ApiLinks.routeValues [ "id", box id ]
+        let resourceHref =
+            ApiLinks.linkOrPath this ApiRouteNames.IntentGetById routeValues (ApiRoutePaths.intentItem id)
         let processing = IntentPipeline.processIntent id request
         let now = DateTimeOffset.UtcNow
         let resource =
-            toResource this id now { request with Expression = processing.NormalizedExpression }
+            toResource resourceHref id now { request with Expression = processing.NormalizedExpression }
         let created = store.Create resource
         shellStore.ProcessingRecords[id] <- processing.ProcessingRecord
         logger.LogInformation("Created TMF921 intent {IntentId} with name {IntentName}", created.Id, created.Name)
-        this.Response.Headers.Location <- created.Href
-        base.StatusCode(StatusCodes.Status201Created, selectFields fields created) :> IActionResult
+        this.CreatedAtRoute(ApiRouteNames.IntentGetById, routeValues, selectFields fields created) :> IActionResult
 
     [<HttpPatch("{id}")>]
     member this.Patch(id: string, [<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : IActionResult =

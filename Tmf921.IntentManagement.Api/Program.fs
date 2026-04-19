@@ -1,6 +1,5 @@
 namespace Tmf921.IntentManagement.Api
 open System
-open System.IO
 open System.Text.Json
 open System.Text.Json.Serialization
 open System.Threading.Tasks
@@ -39,23 +38,26 @@ module Program =
                 app.UseDeveloperExceptionPage() |> ignore
 
             app.Use(Func<HttpContext, RequestDelegate, Task>(fun context next ->
-                let rewritten =
-                    match context.Request.Path.Value with
-                    | null -> "/"
-                    | value -> value.Replace("//", "/")
-                context.Request.Path <- Microsoft.AspNetCore.Http.PathString(rewritten)
+                match ApiRouteCompatibility.tryNormalizePath context.Request.Path with
+                | Some rewritten -> context.Request.Path <- rewritten
+                | None -> ()
                 next.Invoke(context))) |> ignore
 
+            app.Use(Func<HttpContext, RequestDelegate, Task>(fun context next ->
+                if context.Request.Path = PathString(AppPaths.Demo) then
+                    context.Response.Redirect(AppPaths.DemoRoot, false)
+                    Task.CompletedTask
+                else
+                    next.Invoke(context))) |> ignore
+
+            app.UseRouting() |> ignore
             app.UseDefaultFiles() |> ignore
             app.UseStaticFiles() |> ignore
             app.UseAuthorization() |> ignore
             app.MapControllers() |> ignore
 
-            let demoPagePath = Path.Combine(app.Environment.WebRootPath, "demo", "index.html")
-
-            app.MapGet("/", Func<string>(fun () -> "TMF921 Intent Management shell API")) |> ignore
-            app.MapGet("/demo", Func<IResult>(fun () -> Results.File(demoPagePath, "text/html; charset=utf-8"))) |> ignore
-            app.MapGet("/health", Func<obj>(fun () -> {| status = "ok"; api = "TMF921"; version = "v5"; mode = "shell" |})) |> ignore
+            app.MapGet(AppPaths.Root, Func<string>(fun () -> "TMF921 Intent Management shell API")) |> ignore
+            app.MapGet(AppPaths.Health, Func<obj>(fun () -> {| status = "ok"; api = "TMF921"; version = "v5"; mode = "shell" |})) |> ignore
 
             app.Run()
 

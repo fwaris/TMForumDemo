@@ -2,9 +2,10 @@ namespace Tmf921.IntentManagement.Api.Controllers
 
 open System.Text.Json
 open Microsoft.AspNetCore.Mvc
+open Tmf921.IntentManagement.Api
 
 [<ApiController>]
-[<Route("tmf-api/intentManagement/v5/listener")>]
+[<Route(ApiRouteTemplates.ListenerCollection)>]
 type ListenerController() =
     inherit ControllerBase()
 

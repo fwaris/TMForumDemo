@@ -10,10 +10,10 @@
   <div class="page-shell">
     <header class="hero">
       <p class="eyebrow">TMF921 Intent Management Demo</p>
-      <h1>Validate natural-language broadcast intents and inspect the resulting F*</h1>
+      <h3>Choose a scenario, validate it, and inspect the generated F*</h3>
       <p class="hero-copy">
-        Each scenario sends its statement to the backend, runs TM normalization and provider checks,
-        and then displays the generated F* module when the shell can produce one.
+        Pick one of the demo cases, adjust the natural-language statement if needed,
+        and send it to the backend for TM validation, provider checks, and F* generation.
       </p>
       <div class="hero-status">
         <span class="status-dot" id="api-status-dot"></span>
@@ -22,59 +22,65 @@
     </header>
 
     <main>
-      <section class="scenario-grid" id="scenario-grid" aria-live="polite"></section>
+      <article class="scenario-card">
+        <section class="control-panel">
+          <div class="control-row">
+            <label class="scenario-label scenario-select-wrap" for="scenario-select">
+              Scenario
+              <select id="scenario-select" class="scenario-select"></select>
+            </label>
+            <div class="scenario-meta">
+              <p class="scenario-kicker" id="scenario-kicker">Scenario</p>
+              <h2 class="scenario-title" id="scenario-title">Loading...</h2>
+              <span class="scenario-badge" id="scenario-badge">Expected outcome</span>
+            </div>
+          </div>
+
+          <label class="scenario-label" for="scenario-input">
+            Natural-language statement
+            <textarea id="scenario-input" class="scenario-input" rows="8"></textarea>
+          </label>
+
+          <div class="scenario-actions">
+            <button id="run-button" class="run-button" type="button">Validate</button>
+            <span id="run-state" class="run-state">Ready</span>
+          </div>
+        </section>
+
+        <section class="result-panel">
+          <div class="summary-strip" id="summary-strip">Choose a scenario and run validation.</div>
+          <div class="result-grid">
+            <div class="result-block">
+              <h3>TM Validation</h3>
+              <div id="tm-summary" class="tm-summary"></div>
+              <ul id="tm-issues" class="issue-list"></ul>
+            </div>
+            <div class="result-block">
+              <h3>Provider Validation</h3>
+              <div id="provider-summary" class="provider-summary"></div>
+              <ul id="provider-issues" class="issue-list"></ul>
+            </div>
+            <div class="result-block">
+              <h3>Generated TM F*</h3>
+              <pre id="generated-tm-fstar" class="code-frame"></pre>
+            </div>
+            <div class="result-block">
+              <h3>Generated Provider F*</h3>
+              <pre id="generated-provider-fstar" class="code-frame"></pre>
+            </div>
+            <div class="result-block">
+              <h3>Normalized Intent</h3>
+              <pre id="normalized-json" class="code-frame"></pre>
+            </div>
+          </div>
+          <details class="reference-panel">
+            <summary>Reference demo F* case</summary>
+            <pre id="reference-fstar" class="code-frame"></pre>
+          </details>
+        </section>
+      </article>
     </main>
   </div>
-
-  <template id="scenario-template">
-    <article class="scenario-card">
-      <div class="scenario-header">
-        <div>
-          <p class="scenario-kicker"></p>
-          <h2 class="scenario-title"></h2>
-        </div>
-        <span class="scenario-badge"></span>
-      </div>
-
-      <label class="scenario-label">
-        Natural-language statement
-        <textarea class="scenario-input" rows="7"></textarea>
-      </label>
-
-      <div class="scenario-actions">
-        <button class="run-button" type="button">Validate</button>
-        <span class="run-state">Ready</span>
-      </div>
-
-      <section class="result-panel">
-        <div class="summary-strip"></div>
-        <div class="result-grid">
-          <div class="result-block">
-            <h3>TM Validation</h3>
-            <div class="tm-summary"></div>
-            <ul class="issue-list tm-issues"></ul>
-          </div>
-          <div class="result-block">
-            <h3>Provider Validation</h3>
-            <div class="provider-summary"></div>
-            <ul class="issue-list provider-issues"></ul>
-          </div>
-          <div class="result-block">
-            <h3>Normalized Intent</h3>
-            <pre class="code-frame normalized-json"></pre>
-          </div>
-          <div class="result-block">
-            <h3>Generated F*</h3>
-            <pre class="code-frame generated-fstar"></pre>
-          </div>
-        </div>
-        <details class="reference-panel">
-          <summary>Reference demo F* case</summary>
-          <pre class="code-frame reference-fstar"></pre>
-        </details>
-      </section>
-    </article>
-  </template>
 
   <script src="/demo/app.js"></script>
 </body>

@@ -8,6 +8,7 @@
     <Compile Include="Domain.fs" />
     <Compile Include="Store.fs" />
     <Compile Include="ShellResources.fs" />
+    <Compile Include="Routing.fs" />
     <Compile Include="IntentPipeline.fs" />
     <Compile Include="DemoScenarios.fs" />
     <Compile Include="Controllers/HubController.fs" />

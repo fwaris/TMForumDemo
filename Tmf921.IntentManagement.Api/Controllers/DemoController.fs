@@ -9,7 +9,7 @@ type DemoValidateRequest =
       text: string option }
 
 [<ApiController>]
-[<Route("tmf-api/intentManagement/v5/demo")>]
+[<Route(ApiRouteTemplates.DemoCollection)>]
 type DemoController() =
     inherit ControllerBase()
 
