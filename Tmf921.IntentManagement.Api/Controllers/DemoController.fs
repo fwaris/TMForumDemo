@@ -15,8 +15,13 @@ type DemoController() =
 
     let scenarioSummary (scenario: DemoScenarios.DemoScenarioDefinition) =
         {| id = scenario.Id
+           title = scenario.Title
+           kicker = scenario.Kicker
            expectedOutcome = string scenario.ExpectedOutcome
            expectedMessage = scenario.ExpectedMessage
+           expectedJsonAccepted = scenario.ExpectedJsonAccepted
+           expectedFailedWitness = scenario.ExpectedFailedWitness
+           story = scenario.Story
            text = scenario.Text
            fStarFile = scenario.FStarFile |}
 
@@ -54,13 +59,21 @@ type DemoController() =
                 |> Option.bind DemoScenarios.tryFindScenario
                 |> Option.defaultWith (fun () ->
                     { Id = "ad_hoc"
+                      Title = "Ad Hoc Statement"
+                      Kicker = "Interactive"
                       Text = text
                       ExpectedOutcome = DemoScenarios.DemoAccept
                       ExpectedMessage = "Ad hoc validation request."
+                      ExpectedJsonAccepted = false
+                      ExpectedFailedWitness = None
+                      Story = ""
                       FStarFile = None
                       FStarExpectedSuccess = None })
 
-            let validation = DemoScenarios.validateText text
+            let validation =
+                match request.scenarioId |> Option.bind DemoScenarios.tryFindScenario with
+                | Some selectedScenario -> DemoScenarios.validateScenarioText selectedScenario text
+                | None -> DemoScenarios.validateText text
             let pipeline =
                 let intentId = $"demo-{Guid.NewGuid():N}"
                 let outcome = IntentPipeline.processIntent intentId (DemoScenarios.buildNaturalLanguageRequest text)
@@ -71,8 +84,13 @@ type DemoController() =
 
             {| scenario =
                  {| id = scenario.Id
+                    title = scenario.Title
+                    kicker = scenario.Kicker
                     expectedOutcome = string scenario.ExpectedOutcome
                     expectedMessage = scenario.ExpectedMessage
+                    expectedJsonAccepted = scenario.ExpectedJsonAccepted
+                    expectedFailedWitness = scenario.ExpectedFailedWitness
+                    story = scenario.Story
                     referenceFStar = referenceFStar |}
                validation = validation
                pipeline = pipeline |}

@@ -1,21 +1,3 @@
-const featuredScenarioIds = [
-  "broadcast_success_01",
-  "broadcast_fail_latency_01",
-  "broadcast_fail_tm_01"
-];
-
-const scenarioTitles = {
-  broadcast_success_01: "Accepted Broadcast",
-  broadcast_fail_latency_01: "Provider Rejection",
-  broadcast_fail_tm_01: "TM Rejection"
-};
-
-const scenarioKickers = {
-  broadcast_success_01: "Scenario 1",
-  broadcast_fail_latency_01: "Scenario 2",
-  broadcast_fail_tm_01: "Scenario 3"
-};
-
 const expectedLabels = {
   DemoAccept: "Expected accepted",
   DemoRejectProvider: "Expected provider rejection",
@@ -43,23 +25,30 @@ const scenarioInput = firstElement("#scenario-input", ".scenario-input");
 const runButton = firstElement("#run-button", ".run-button");
 const runState = firstElement("#run-state", ".run-state");
 const summaryStrip = firstElement("#summary-strip", ".summary-strip");
-const tmSummary = firstElement("#tm-summary", ".tm-summary");
-const providerSummary = firstElement("#provider-summary", ".provider-summary");
-const tmIssues = firstElement("#tm-issues", ".tm-issues", ".issue-list.tm-issues");
-const providerIssues = firstElement("#provider-issues", ".provider-issues", ".issue-list.provider-issues");
-const generatedTmFstar = firstElement("#generated-tm-fstar", "#generated-fstar", ".generated-fstar");
+const storyStrip = firstElement("#story-strip", ".story-strip");
+const jsonSummary = firstElement("#json-summary");
+const tmSummary = firstElement("#tm-summary");
+const providerSummary = firstElement("#provider-summary");
+const providerProfile = firstElement("#provider-profile");
+const providerToken = firstElement("#provider-token");
+const jsonIssues = firstElement("#json-issues");
+const tmIssues = firstElement("#tm-issues");
+const providerIssues = firstElement("#provider-issues");
+const normalizedJson = firstElement("#normalized-json");
 const generatedProviderFstar = firstElement("#generated-provider-fstar");
-const normalizedJson = firstElement("#normalized-json", ".normalized-json");
-const referenceFstar = firstElement("#reference-fstar", ".reference-fstar");
-const scenarioKicker = firstElement("#scenario-kicker", ".scenario-kicker");
-const scenarioTitle = firstElement("#scenario-title", ".scenario-title");
-const scenarioBadge = firstElement("#scenario-badge", ".scenario-badge");
+const providerCheckerOutput = firstElement("#provider-checker-output");
+const auditShellMeta = firstElement("#audit-shell-meta");
+const auditShellFstar = firstElement("#audit-shell-fstar");
+const referenceFstar = firstElement("#reference-fstar");
+const scenarioKicker = firstElement("#scenario-kicker");
+const scenarioTitle = firstElement("#scenario-title");
+const scenarioBadge = firstElement("#scenario-badge");
+const constraintTrace = firstElement("#constraint-trace");
+const jsonCard = firstElement("#json-card");
+const tmCard = firstElement("#tm-card");
+const providerCard = firstElement("#provider-card");
 
 let scenariosById = new Map();
-
-function formatJson(value) {
-  return value ? JSON.stringify(value, null, 2) : "No normalized structure was produced.";
-}
 
 function setText(element, text) {
   if (!element) {
@@ -69,7 +58,17 @@ function setText(element, text) {
   element.textContent = text;
 }
 
-function renderIssues(listElement, issues) {
+function formatJson(value) {
+  return value ? JSON.stringify(value, null, 2) : "No normalized intent was produced.";
+}
+
+function resetList(element) {
+  if (element) {
+    element.replaceChildren();
+  }
+}
+
+function renderIssues(listElement, issues, emptyText) {
   if (!listElement) {
     return;
   }
@@ -78,16 +77,27 @@ function renderIssues(listElement, issues) {
 
   if (!issues || issues.length === 0) {
     const item = document.createElement("li");
-    item.textContent = "No issues.";
+    item.textContent = emptyText;
     listElement.appendChild(item);
     return;
   }
 
-  issues.forEach((issue) => {
+  issues.forEach((entry) => {
     const item = document.createElement("li");
-    item.textContent = `${issue.code}: ${issue.message}`;
+    item.textContent = `${entry.code}: ${entry.message}`;
     listElement.appendChild(item);
   });
+}
+
+function laneClass(card, state) {
+  if (!card) {
+    return;
+  }
+
+  card.className = "lane-card";
+  if (state) {
+    card.classList.add(state);
+  }
 }
 
 function outcomeLabel(finalOutcome) {
@@ -95,9 +105,9 @@ function outcomeLabel(finalOutcome) {
     case "accepted":
       return "Accepted end-to-end";
     case "rejected_provider":
-      return "Rejected by provider constraints";
+      return "Rejected by provider witnesses";
     case "rejected_tm":
-      return "Rejected during TM normalization";
+      return "Rejected during TM witness construction";
     default:
       return "Unexpected outcome";
   }
@@ -109,30 +119,100 @@ function generatedTmFStarText(result) {
   }
 
   if (result.pipeline?.diagnostics?.length) {
-    const detail = result.pipeline.diagnostics
+    return result.pipeline.diagnostics
       .map((diag) => `${diag.code}: ${diag.message}${diag.details ? `\n${diag.details}` : ""}`)
       .join("\n\n");
-    return `No checked F* module was produced.\n\n${detail}`;
   }
 
-  return "No checked F* module was produced for this input.";
+  return "No shell F* artifact was produced for this request.";
 }
 
-function generatedProviderFStarText(result) {
-  if (result.validation.providerFStarModule) {
-    return result.validation.providerFStarModule;
+function pipelineAuditText(result) {
+  if (!result.pipeline) {
+    return "No shell-processing audit record is available.";
   }
 
-  const providerAccepted = result.validation.providerAccepted;
-  if (providerAccepted === null || providerAccepted === undefined) {
-    return "Provider F* was not generated because provider validation did not run.";
+  return JSON.stringify(
+    {
+      classification: result.pipeline.classification,
+      status: result.pipeline.status,
+      checkerVersion: result.pipeline.checkerVersion,
+      diagnostics: result.pipeline.diagnostics || [],
+      artifacts: result.pipeline.artifacts || null
+    },
+    null,
+    2
+  );
+}
+
+function providerSummaryText(validation) {
+  const provider = validation.dependentProvider;
+  if (provider.accepted === true) {
+    return `Provider witness succeeds for ${provider.selectedProfile || "the resolved profile"}.`;
   }
 
-  if (!result.validation.providerDecision?.selectedProfile) {
-    return "Provider F* was not generated because the normalized intent could not be mapped to a supported provider profile.";
+  if (provider.accepted === false) {
+    return `Provider witness fails at ${provider.failedWitness || "provider_checked_intent"}.`;
   }
 
-  return "No provider F* module was produced for this input.";
+  return "Provider witness is skipped because the TM witness does not exist.";
+}
+
+function jsonSummaryText(validation) {
+  return validation.jsonBaseline.accepted
+    ? `${validation.jsonBaseline.dialect} accepts the normalized shape.`
+    : `${validation.jsonBaseline.dialect} rejects the normalized shape.`;
+}
+
+function tmSummaryText(validation) {
+  return validation.dependentTm.accepted
+    ? "A TM-level witness can be constructed from the normalized intent."
+    : `TM witness construction stops at ${validation.dependentTm.failedWitness || "the TM stage"}.`;
+}
+
+function renderConstraintTrace(trace) {
+  if (!constraintTrace) {
+    return;
+  }
+
+  constraintTrace.replaceChildren();
+
+  if (!trace || trace.length === 0) {
+    const item = document.createElement("li");
+    item.className = "constraint-item";
+    item.textContent = "No constraint trace is available.";
+    constraintTrace.appendChild(item);
+    return;
+  }
+
+  trace.forEach((entry) => {
+    const item = document.createElement("li");
+    item.className = `constraint-item ${entry.status || "skipped"}`;
+
+    const header = document.createElement("div");
+    header.className = "constraint-header";
+
+    const stage = document.createElement("span");
+    stage.className = "constraint-stage";
+    stage.textContent = entry.stage;
+
+    const status = document.createElement("span");
+    status.className = `constraint-status ${entry.status || "skipped"}`;
+    status.textContent = entry.status || "unknown";
+
+    header.append(stage, status);
+
+    const witness = document.createElement("div");
+    witness.className = "constraint-witness";
+    witness.textContent = entry.witness;
+
+    const summary = document.createElement("p");
+    summary.className = "constraint-summary";
+    summary.textContent = entry.summary;
+
+    item.append(header, witness, summary);
+    constraintTrace.appendChild(item);
+  });
 }
 
 function selectedScenario() {
@@ -140,7 +220,35 @@ function selectedScenario() {
     return null;
   }
 
-  return scenariosById.get(scenarioSelect.value);
+  return scenariosById.get(scenarioSelect.value) || null;
+}
+
+function resetResultPanels() {
+  if (summaryStrip) {
+    summaryStrip.className = "summary-strip";
+  }
+
+  laneClass(jsonCard, null);
+  laneClass(tmCard, null);
+  laneClass(providerCard, null);
+
+  setText(summaryStrip, "Choose a scenario and run validation.");
+  setText(storyStrip, "The demo will explain why the selected case is more than schema validation.");
+  setText(jsonSummary, "");
+  setText(tmSummary, "");
+  setText(providerSummary, "");
+  setText(providerProfile, "");
+  setText(providerToken, "");
+  setText(normalizedJson, "");
+  setText(generatedProviderFstar, "");
+  setText(providerCheckerOutput, "");
+  setText(auditShellMeta, "");
+  setText(auditShellFstar, "");
+  setText(referenceFstar, "");
+  resetList(jsonIssues);
+  resetList(tmIssues);
+  resetList(providerIssues);
+  renderConstraintTrace([]);
 }
 
 function updateScenarioDetails() {
@@ -149,64 +257,60 @@ function updateScenarioDetails() {
     return;
   }
 
-  setText(scenarioKicker, scenarioKickers[scenario.id] || "Scenario");
-  setText(scenarioTitle, scenarioTitles[scenario.id] || scenario.id);
+  resetResultPanels();
+  setText(scenarioKicker, scenario.kicker || "Scenario");
+  setText(scenarioTitle, scenario.title || scenario.id);
   setText(scenarioBadge, expectedLabels[scenario.expectedOutcome] || scenario.expectedOutcome);
   if (scenarioInput) {
     scenarioInput.value = scenario.text;
   }
-  setText(summaryStrip, "Press Validate to send the statement to the backend.");
-  if (summaryStrip) {
-    summaryStrip.className = "summary-strip";
-  }
-  setText(tmSummary, "");
-  setText(providerSummary, "");
-  setText(generatedTmFstar, "");
-  setText(generatedProviderFstar, "");
-  setText(normalizedJson, "");
-  setText(referenceFstar, "");
-  tmIssues.replaceChildren();
-  providerIssues.replaceChildren();
+  setText(storyStrip, scenario.story || "This scenario will show how the witness chain differs from schema validation.");
 }
 
 function applyResult(result) {
+  const validation = result.validation;
+  const scenario = result.scenario;
+
   if (summaryStrip) {
     summaryStrip.className = "summary-strip";
-    if (result.validation.finalOutcome === "accepted") {
-      summaryStrip.classList.add("success");
-    } else {
-      summaryStrip.classList.add("failure");
-    }
+    summaryStrip.classList.add(validation.finalOutcome === "accepted" ? "success" : "failure");
   }
 
-  setText(
-    summaryStrip,
-    `${outcomeLabel(result.validation.finalOutcome)}. ${result.scenario.expectedMessage}`
+  setText(summaryStrip, `${outcomeLabel(validation.finalOutcome)}. ${scenario.expectedMessage}`);
+  setText(storyStrip, validation.story || scenario.story || "");
+
+  setText(jsonSummary, jsonSummaryText(validation));
+  setText(tmSummary, tmSummaryText(validation));
+  setText(providerSummary, providerSummaryText(validation));
+  setText(providerProfile, validation.dependentProvider.selectedProfile
+    ? `Resolved profile: ${validation.dependentProvider.selectedProfile}`
+    : "Resolved profile: not available");
+  setText(providerToken, validation.dependentProvider.admissionTokenType
+    ? `Downstream artifact: ${validation.dependentProvider.admissionTokenType}`
+    : "Downstream artifact: not constructible");
+
+  laneClass(jsonCard, validation.jsonBaseline.accepted ? "success" : "failure");
+  laneClass(tmCard, validation.dependentTm.accepted ? "success" : "failure");
+  laneClass(
+    providerCard,
+    validation.dependentProvider.accepted === true
+      ? "success"
+      : validation.dependentProvider.accepted === false
+        ? "failure"
+        : "skipped"
   );
 
-  setText(
-    tmSummary,
-    result.validation.tmAccepted
-      ? "TM normalization accepted the statement."
-      : "TM normalization rejected the statement."
-  );
+  renderIssues(jsonIssues, validation.jsonBaseline.issues || [], "No JSON baseline issues.");
+  renderIssues(tmIssues, validation.dependentTm.issues || [], "No TM witness issues.");
+  renderIssues(providerIssues, validation.dependentProvider.issues || [], "No provider witness issues.");
+  renderConstraintTrace(validation.constraintTrace || []);
 
-  const providerAccepted = result.validation.providerAccepted;
-  setText(
-    providerSummary,
-    providerAccepted === null || providerAccepted === undefined
-      ? "Provider validation did not run because TM validation failed."
-      : providerAccepted
-        ? `Provider accepted the request using ${result.validation.providerDecision?.selectedProfile || "the matched profile"}.`
-        : `Provider rejected the request${result.validation.providerDecision?.selectedProfile ? ` for ${result.validation.providerDecision.selectedProfile}` : ""}.`
-  );
-
-  renderIssues(tmIssues, result.validation.tmIssues || []);
-  renderIssues(providerIssues, result.validation.providerDecision?.checks || []);
-  setText(generatedTmFstar, generatedTmFStarText(result));
-  setText(generatedProviderFstar, generatedProviderFStarText(result));
-  setText(normalizedJson, formatJson(result.validation.normalizedIntent));
-  setText(referenceFstar, result.scenario.referenceFStar || "No reference F* file is attached to this scenario.");
+  setText(normalizedJson, formatJson(validation.normalizedIntent));
+  setText(generatedProviderFstar, validation.dependentProvider.generatedModule || "No provider F* module was produced.");
+  setText(providerCheckerOutput, validation.dependentProvider.checkerExcerpt || "No checker excerpt is available.");
+  setText(auditShellMeta, pipelineAuditText(result));
+  setText(auditShellFstar, generatedTmFStarText(result));
+  setText(referenceFstar, scenario.referenceFStar || "No reference F* file is attached to this scenario.");
 }
 
 async function validateScenario() {
@@ -215,7 +319,9 @@ async function validateScenario() {
     return;
   }
 
-  runButton.disabled = true;
+  if (runButton) {
+    runButton.disabled = true;
+  }
   setText(runState, "Running backend validation...");
 
   try {
@@ -276,21 +382,17 @@ async function loadScenarios() {
   }
 
   const scenarios = await response.json();
-  const ordered = featuredScenarioIds
-    .map((id) => scenarios.find((scenario) => scenario.id === id))
-    .filter(Boolean);
+  scenariosById = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
 
-  scenariosById = new Map(ordered.map((scenario) => [scenario.id, scenario]));
-
-  ordered.forEach((scenario) => {
+  scenarios.forEach((scenario) => {
     const option = document.createElement("option");
     option.value = scenario.id;
-    option.textContent = scenarioTitles[scenario.id] || scenario.id;
+    option.textContent = scenario.title || scenario.id;
     scenarioSelect?.appendChild(option);
   });
 
-  if (ordered.length > 0 && scenarioSelect) {
-    scenarioSelect.value = ordered[0].id;
+  if (scenarios.length > 0 && scenarioSelect) {
+    scenarioSelect.value = scenarios[0].id;
     updateScenarioDetails();
   }
 }
@@ -304,7 +406,9 @@ async function bootstrap() {
   try {
     await loadScenarios();
   } catch (error) {
-    summaryStrip.className = "summary-strip failure";
+    if (summaryStrip) {
+      summaryStrip.className = "summary-strip failure";
+    }
     setText(summaryStrip, `Unable to load demo scenarios. ${error.message}`);
   }
 }

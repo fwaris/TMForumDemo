@@ -19,8 +19,20 @@ let overloaded_intent : tm_intent =
     preserve_emergency_traffic = true;
     request_public_safety_preemption = false }
 
+let selected_profile : profile =
+  LiveBroadcastGold
+
+let measurable : measurable_intent overloaded_intent =
+  mk_measurable overloaded_intent
+
+let window_checked : window_checked_intent overloaded_intent =
+  mk_window_checked overloaded_intent
+
 let tm_checked : tm_checked_intent overloaded_intent =
   mk_tm_checked overloaded_intent
 
-let provider_checked : provider_checked_intent overloaded_intent =
-  mk_provider_checked overloaded_intent
+let profiled : profiled_intent selected_profile overloaded_intent =
+  mk_profiled selected_profile overloaded_intent
+
+let capacity_checked : capacity_checked_intent selected_profile overloaded_intent =
+  mk_capacity_checked selected_profile overloaded_intent
