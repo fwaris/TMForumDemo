@@ -5,13 +5,18 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FSharp.SystemTextJson" Version="1.4.36" />
     <PackageReference Include="JsonSchema.Net" Version="9.2.0" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.2.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.2.0-preview.1.26063.2" />
+    <PackageReference Include="OpenAI" Version="2.8.0" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="Domain.fs" />
     <Compile Include="Store.fs" />
     <Compile Include="ShellResources.fs" />
+    <Compile Include="RawIntentGeneration.fs" />
     <Compile Include="Routing.fs" />
     <Compile Include="IntentPipeline.fs" />
     <Compile Include="DemoScenarios.fs" />

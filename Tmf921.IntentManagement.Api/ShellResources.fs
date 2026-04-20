@@ -2,6 +2,7 @@ namespace Tmf921.IntentManagement.Api
 
 open System
 open System.Collections.Concurrent
+open System.IO
 open System.Text.Json
 open System.Text.Json.Nodes
 open System.Text.Json.Serialization
@@ -21,6 +22,32 @@ type ShellStore() =
 module ShellJson =
     let nowText () = DateTimeOffset.UtcNow.ToString("O")
 
+    let repoRoot () =
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."))
+
+    let configureBaseSerializerOptions (options: JsonSerializerOptions) =
+        options.DefaultIgnoreCondition <- JsonIgnoreCondition.WhenWritingNull
+        options.PropertyNameCaseInsensitive <- true
+        options.TypeInfoResolver <- JsonSerializerOptions.Default.TypeInfoResolver
+        options
+
+    let configureSerializerOptions (options: JsonSerializerOptions) =
+        configureBaseSerializerOptions options |> ignore
+
+        options.Converters.Add(
+            JsonFSharpConverter(
+                JsonFSharpOptions
+                    .Default()
+                    .WithSkippableOptionFields(SkippableOptionFields.FromJsonSerializerOptions, true)
+                    .WithAllowNullFields(true)
+            )
+        )
+
+        options
+
+    let llmStructuredOutputSerializerOptions =
+        JsonSerializerOptions() |> configureBaseSerializerOptions
+
     let cloneNode (element: JsonElement) : JsonNode =
         JsonNode.Parse(element.GetRawText())
 
@@ -32,9 +59,7 @@ module ShellJson =
     let href (basePath: string) (id: string) = $"{basePath}/{id}"
 
     let serializerOptions =
-        let o = JsonSerializerOptions()
-        o.DefaultIgnoreCondition <- JsonIgnoreCondition.WhenWritingNull
-        o
+        JsonSerializerOptions() |> configureSerializerOptions
 
     let private wantedWithRequiredMetadata (obj: JsonObject) (wanted: Set<string>) =
         [ "@type"; "id"; "href" ]

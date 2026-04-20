@@ -58,6 +58,10 @@ function setText(element, text) {
   element.textContent = text;
 }
 
+function normalizedText(value) {
+  return (value || "").trim();
+}
+
 function formatJson(value) {
   return value ? JSON.stringify(value, null, 2) : "No normalized intent was produced.";
 }
@@ -223,6 +227,17 @@ function selectedScenario() {
   return scenariosById.get(scenarioSelect.value) || null;
 }
 
+function effectiveScenarioReference() {
+  const scenario = selectedScenario();
+  if (!scenario) {
+    return null;
+  }
+
+  const currentText = normalizedText(scenarioInput?.value || scenario.text);
+  const scenarioText = normalizedText(scenario.text);
+  return currentText === scenarioText ? scenario : null;
+}
+
 function resetResultPanels() {
   if (summaryStrip) {
     summaryStrip.className = "summary-strip";
@@ -251,20 +266,40 @@ function resetResultPanels() {
   renderConstraintTrace([]);
 }
 
-function updateScenarioDetails() {
+function refreshScenarioReferenceState() {
   const scenario = selectedScenario();
   if (!scenario) {
     return;
   }
 
   resetResultPanels();
-  setText(scenarioKicker, scenario.kicker || "Scenario");
-  setText(scenarioTitle, scenario.title || scenario.id);
-  setText(scenarioBadge, expectedLabels[scenario.expectedOutcome] || scenario.expectedOutcome);
+  const activeScenario = effectiveScenarioReference();
+
+  if (activeScenario) {
+    setText(scenarioKicker, activeScenario.kicker || "Scenario");
+    setText(scenarioTitle, activeScenario.title || activeScenario.id);
+    setText(scenarioBadge, expectedLabels[activeScenario.expectedOutcome] || activeScenario.expectedOutcome);
+    setText(storyStrip, activeScenario.story || "This scenario will show how the witness chain differs from schema validation.");
+    return;
+  }
+
+  setText(scenarioKicker, "Interactive");
+  setText(scenarioTitle, "Ad Hoc Statement");
+  setText(scenarioBadge, "Live LLM");
+  setText(storyStrip, "Custom text now runs fully live through the LLM-backed ontology path with no scenario fixture reference.");
+}
+
+function updateScenarioDetails() {
+  const scenario = selectedScenario();
+  if (!scenario) {
+    return;
+  }
+
   if (scenarioInput) {
     scenarioInput.value = scenario.text;
   }
-  setText(storyStrip, scenario.story || "This scenario will show how the witness chain differs from schema validation.");
+
+  refreshScenarioReferenceState();
 }
 
 function applyResult(result) {
@@ -314,8 +349,10 @@ function applyResult(result) {
 }
 
 async function validateScenario() {
-  const scenario = selectedScenario();
-  if (!scenario) {
+  const scenario = effectiveScenarioReference();
+  const text = normalizedText(scenarioInput?.value || selectedScenario()?.text || "");
+
+  if (!text) {
     return;
   }
 
@@ -331,8 +368,8 @@ async function validateScenario() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        scenarioId: scenario.id,
-        text: scenarioInput?.value || scenario.text
+        scenarioId: scenario?.id,
+        text
       })
     });
 
@@ -400,6 +437,7 @@ async function loadScenarios() {
 async function bootstrap() {
   runButton?.addEventListener("click", validateScenario);
   scenarioSelect?.addEventListener("change", updateScenarioDetails);
+  scenarioInput?.addEventListener("input", refreshScenarioReferenceState);
 
   await loadHealth();
 

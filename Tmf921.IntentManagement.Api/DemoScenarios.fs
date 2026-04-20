@@ -6,7 +6,7 @@ open System.Globalization
 open System.IO
 open System.Text
 open System.Text.Json
-open System.Text.RegularExpressions
+open System.Threading.Tasks
 
 module DemoScenarios =
     type DemoExpectedOutcome =
@@ -126,94 +126,304 @@ module DemoScenarios =
         { Code = code
           Message = message }
 
-    let private regexGroup pattern text =
-        let m = Regex.Match(text, pattern, RegexOptions.IgnoreCase)
-        if m.Success then Some (m.Groups[1].Value.Trim()) else None
+    let private trimToOption (value: string option) =
+        value
+        |> Option.bind (fun text ->
+            let trimmed = text.Trim()
+            if String.IsNullOrWhiteSpace trimmed then None else Some trimmed)
 
-    let private regexInt pattern text =
-        regexGroup pattern text
-        |> Option.bind (fun value ->
-            match Int32.TryParse value with
+    let private normalizeToken (value: string) =
+        value.Trim().ToLowerInvariant().Replace("-", "").Replace("_", "").Replace(" ", "")
+
+    let private containsText (needle: string) (value: string) =
+        value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0
+
+    let private splitOnce (separator: string) (value: string) =
+        let index = value.IndexOf(separator, StringComparison.Ordinal)
+        if index < 0 then None else Some(value.Substring(0, index), value.Substring(index + separator.Length))
+
+    let private tryParseIntText (value: string option) =
+        value
+        |> trimToOption
+        |> Option.bind (fun text ->
+            match Int32.TryParse text with
             | true, parsed -> Some parsed
             | _ -> None)
 
-    let private parseDate text =
-        regexGroup @"on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})" text
-        |> Option.bind (fun value ->
-            match DateOnly.TryParse value with
-            | true, parsed -> Some parsed
-            | _ -> None)
+    let private tryParseDateText (value: string) =
+        match DateOnly.TryParse(value.Trim(), CultureInfo.InvariantCulture) with
+        | true, parsed -> Some parsed
+        | _ -> None
 
-    let private parseTimezone text =
-        regexGroup @"from\s+\d{1,2}:\d{2}\s+to\s+\d{1,2}:\d{2}\s+([A-Za-z_\/]+)" text
+    let private tryParseHourText (value: string) =
+        let trimmed = value.Trim()
+        let hourText =
+            match splitOnce ":" trimmed with
+            | Some(hour, _) -> hour
+            | None -> trimmed
 
-    let private parseHours text =
-        let m = Regex.Match(text, @"from\s+(\d{1,2}):\d{2}\s+to\s+(\d{1,2}):\d{2}", RegexOptions.IgnoreCase)
+        match Int32.TryParse hourText with
+        | true, parsed when parsed >= 0 && parsed <= 23 -> Some parsed
+        | _ -> None
 
-        if m.Success then
-            let okStart, startHour = Int32.TryParse m.Groups[1].Value
-            let okEnd, endHour = Int32.TryParse m.Groups[2].Value
+    let private expectationTexts (expectation: CanonicalExpectation) =
+        [ Some expectation.Kind
+          Some expectation.Subject
+          expectation.Description
+          expectation.Condition |> Option.map (fun condition -> condition.Kind)
+          expectation.Condition |> Option.bind (fun condition -> condition.Subject)
+          expectation.Condition |> Option.bind (fun condition -> condition.Operator)
+          expectation.Condition |> Option.bind (fun condition -> condition.Value)
+          expectation.Quantity |> Option.map (fun quantity -> quantity.Value)
+          expectation.Quantity |> Option.bind (fun quantity -> quantity.Unit)
+          expectation.FunctionApplication |> Option.map (fun application -> application.Name)
+          expectation.FunctionApplication |> Option.map (fun application -> String.concat " " application.Arguments) ]
+        |> List.choose trimToOption
 
-            if okStart && okEnd then
-                Some(startHour, endHour)
+    let private canonicalTexts (canonical: CanonicalIntentIr) =
+        [ canonical.Description
+          canonical.Context
+          canonical.Priority
+          yield!
+            canonical.Expectations
+            |> List.collect expectationTexts
+            |> List.map Some ]
+        |> List.choose trimToOption
+
+    let private expectationMatches (tokens: string list) (expectation: CanonicalExpectation) =
+        let normalizedTexts =
+            expectationTexts expectation |> List.map normalizeToken
+
+        tokens
+        |> List.exists (fun token ->
+            normalizedTexts
+            |> List.exists (fun text -> text = token || text.Contains(token, StringComparison.Ordinal)))
+
+    let private tryFindExpectation tokens (canonical: CanonicalIntentIr) =
+        canonical.Expectations |> List.tryFind (expectationMatches tokens)
+
+    let private parseDateTimeParts (parts: string list) =
+        let cleanToken (value: string) =
+            value.Trim().TrimEnd('.', ';', ',')
+
+        let parseTimezone remainder =
+            let cleaned = remainder |> List.map cleanToken |> List.filter (String.IsNullOrWhiteSpace >> not)
+
+            match cleaned with
+            | [] -> None
+            | first :: _ when first.Contains("/") || first.Contains("_") -> Some first
+            | first :: _ -> Some first
+
+        match parts with
+        | dateText :: timeText :: remainder when tryParseDateText dateText |> Option.isSome ->
+            tryParseDateText dateText, tryParseHourText timeText, parseTimezone remainder
+        | timeText :: remainder ->
+            None, tryParseHourText timeText, parseTimezone remainder
+        | _ -> None, None, None
+
+    let private tryParseWindowValue (value: string) =
+        match splitOnce " to " (value.Trim()) with
+        | None -> None
+        | Some(startText, endText) ->
+            let startParts =
+                startText.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                |> Array.toList
+
+            let endParts =
+                endText.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                |> Array.toList
+
+            let startDate, startHour, _ = parseDateTimeParts startParts
+            let endDate, endHour, timezone = parseDateTimeParts endParts
+
+            Some(startDate |> Option.orElse endDate, startHour, endHour, timezone)
+
+    let private tryExtractWindowFromText (text: string) =
+        let lower = text.ToLowerInvariant()
+        let onIndex = lower.IndexOf(" on ", StringComparison.Ordinal)
+        let fromIndex = lower.IndexOf(" from ", StringComparison.Ordinal)
+        let toIndex =
+            if fromIndex >= 0 then
+                lower.IndexOf(" to ", fromIndex + 6, StringComparison.Ordinal)
+            else
+                -1
+
+        if onIndex < 0 || fromIndex <= onIndex || toIndex <= fromIndex then
+            None
+        else
+            let dateText =
+                text.Substring(onIndex + 4, fromIndex - (onIndex + 4)).Trim().TrimEnd('.')
+
+            let startText =
+                text.Substring(fromIndex + 6, toIndex - (fromIndex + 6)).Trim()
+
+            let endText =
+                text.Substring(toIndex + 4).Trim().TrimEnd('.')
+
+            let endParts =
+                endText.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                |> Array.toList
+
+            let _, endHour, timezone = parseDateTimeParts endParts
+
+            Some(tryParseDateText dateText, tryParseHourText startText, endHour, timezone)
+
+    let private tryExtractWindow (canonical: CanonicalIntentIr) =
+        let fromCondition =
+            canonical.Expectations
+            |> List.tryPick (fun expectation ->
+                expectation.Condition
+                |> Option.bind (fun condition ->
+                    let conditionKind = normalizeToken condition.Kind
+                    let conditionOperator = condition.Operator |> Option.map normalizeToken |> Option.defaultValue ""
+
+                    if conditionKind = "timewindow" || conditionOperator = "between" then
+                        condition.Value |> Option.bind tryParseWindowValue
+                    else
+                        None))
+
+        fromCondition
+        |> Option.orElseWith (fun () ->
+            canonicalTexts canonical
+            |> List.tryPick tryExtractWindowFromText)
+
+    let private parseQuantityValue (expectation: CanonicalExpectation) =
+        expectation.Quantity
+        |> Option.bind (fun quantity -> tryParseIntText (Some quantity.Value))
+
+    let private parseReportingMinutes (expectation: CanonicalExpectation) =
+        let fromQuantity =
+            expectation.Quantity
+            |> Option.bind (fun quantity ->
+                let quantityValue = tryParseIntText (Some quantity.Value)
+                let quantityUnit = quantity.Unit |> Option.map normalizeToken |> Option.defaultValue ""
+
+                match quantityValue with
+                | Some value when quantityUnit.Contains("hour", StringComparison.Ordinal) -> Some(value * 60)
+                | Some value when quantityUnit.Contains("minute", StringComparison.Ordinal) -> Some value
+                | Some value when quantityUnit.Contains("min", StringComparison.Ordinal) -> Some value
+                | _ -> None)
+
+        let fromCondition =
+            expectation.Condition
+            |> Option.bind (fun condition ->
+                match condition.Value |> trimToOption with
+                | Some value when String.Equals(value, "hourly", StringComparison.OrdinalIgnoreCase) ->
+                    Some 60
+                | Some value when String.Equals(value, "daily", StringComparison.OrdinalIgnoreCase) ->
+                    Some 1440
+                | Some value when containsText "hour" value ->
+                    value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    |> Array.tryHead
+                    |> tryParseIntText
+                    |> Option.map (fun hours -> hours * 60)
+                | Some value when containsText "minute" value ->
+                    value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    |> Array.tryHead
+                    |> tryParseIntText
+                | _ -> None)
+
+        fromQuantity |> Option.orElse fromCondition
+
+    let private collectPolicyTexts (canonical: CanonicalIntentIr) =
+        canonical.Expectations
+        |> List.collect expectationTexts
+
+    let private emptyDemoIntent text =
+        { IntentName = "LiveBroadcastIntent"
+          Venue = None
+          ServiceClass = None
+          EventDate = None
+          StartHour = None
+          EndHour = None
+          Timezone = None
+          DeviceCount = None
+          MaxUplinkLatencyMs = None
+          ReportingIntervalMinutes = None
+          ImmediateDegradationAlerts = false
+          PreserveEmergencyTraffic = false
+          RequestsPublicSafetyPreemption = false
+          OriginalText = text }
+
+    let private canonicalToDemoIntent (text: string) (canonical: CanonicalIntentIr) =
+        let venue =
+            canonical.Targets
+            |> List.tryPick (fun target ->
+                target.Name
+                |> trimToOption
+                |> Option.orElseWith (fun () ->
+                    if containsText "target-" target.Id then None else Some target.Id))
+
+        let eventDate, startHour, endHour, timezone =
+            tryExtractWindow canonical
+            |> Option.defaultValue(None, None, None, None)
+
+        let capacityExpectation = tryFindExpectation [ "capacity"; "devices"; "productiondevices" ] canonical
+        let latencyExpectation = tryFindExpectation [ "latency"; "uplinklatency"; "uplink" ] canonical
+        let reportingExpectation = tryFindExpectation [ "reporting"; "complianceupdates"; "compliance" ] canonical
+        let alertingExpectation = tryFindExpectation [ "alerting"; "servicequalitydegradation"; "servicequality" ] canonical
+
+        let allTexts = canonicalTexts canonical
+        let allJoinedText = String.concat " " allTexts
+        let priorityText = canonical.Priority |> Option.defaultValue ""
+
+        let serviceClass =
+            if containsText "broadcast" allJoinedText
+               && containsText "5g" allJoinedText
+               && (containsText "premium" allJoinedText || containsText "premium" priorityText)
+            then
+                Some "premium-5g-broadcast"
             else
                 None
-        else
-            None
 
-    let private parseReportingInterval (text: string) =
-        if Regex.IsMatch(text, @"hourly\s+compliance\s+updates", RegexOptions.IgnoreCase) then
-            Some 60
-        else
-            regexInt @"every\s+(\d+)\s+minutes?" text
+        let preserveEmergencyTraffic =
+            collectPolicyTexts canonical
+            |> List.exists (fun value ->
+                containsText "emergency-service traffic" value
+                || containsText "emergency service traffic" value)
+            && not (
+                collectPolicyTexts canonical
+                |> List.exists (fun value -> containsText "preempt" value && containsText "public-safety" value)
+            )
+            ||
+            canonical.Expectations
+            |> List.exists (fun expectation ->
+                let operatorText =
+                    expectation.Condition
+                    |> Option.bind (fun condition -> condition.Operator)
+                    |> Option.map normalizeToken
+                    |> Option.defaultValue ""
 
-    let private inferServiceClass (text: string) =
-        if Regex.IsMatch(text, @"premium\s+5G\s+broadcast\s+service", RegexOptions.IgnoreCase) then
-            Some "premium-5g-broadcast"
-        else
-            None
+                (containsText "emergency-service traffic" (String.concat " " (expectationTexts expectation))
+                 || containsText "emergency service traffic" (String.concat " " (expectationTexts expectation)))
+                && (operatorText = "noimpact" || operatorText = "notimpact" || containsText "do not impact" (String.concat " " (expectationTexts expectation))))
 
-    let private parseIntentName (venue: string option) =
-        venue
-        |> Option.map (fun value -> value.Replace(" ", String.Empty) + "LiveBroadcast")
-        |> Option.defaultValue "LiveBroadcastIntent"
+        let requestsPublicSafetyPreemption =
+            collectPolicyTexts canonical
+            |> List.exists (fun value ->
+                containsText "public-safety" value
+                || containsText "public safety" value
+                || containsText "preempt" value)
 
-    let parseTextIntent text =
-        let venue = regexGroup @"at\s+([A-Za-z ]+?)\s+on\s+[A-Za-z]+\s+\d{1,2},\s+\d{4}" text
-        let date = parseDate text
-        let hours = parseHours text
-        let timezone = parseTimezone text
-        let devices = regexInt @"support\s+up\s+to\s+(\d+)\s+production\s+devices" text
-        let latency = regexInt @"latency\s+under\s+(\d+)\s*ms" text
-        let interval = parseReportingInterval text
-
-        let immediateAlerts =
-            Regex.IsMatch(text, @"immediate\s+alerts?.+degrades?|immediate\s+alerts?.+degradation", RegexOptions.IgnoreCase)
-
-        let preserveEmergency =
-            Regex.IsMatch(text, @"do\s+not\s+impact\s+emergency-service\s+traffic", RegexOptions.IgnoreCase)
-
-        let preemptSafety =
-            Regex.IsMatch(text, @"preempt\s+reserved\s+public-safety\s+capacity", RegexOptions.IgnoreCase)
-
-        let startHour, endHour =
-            match hours with
-            | Some(startHour, endHour) -> Some startHour, Some endHour
-            | None -> None, None
-
-        { IntentName = parseIntentName venue
+        { IntentName = canonical.IntentName
           Venue = venue
-          ServiceClass = inferServiceClass text
-          EventDate = date
+          ServiceClass = serviceClass
+          EventDate = eventDate
           StartHour = startHour
           EndHour = endHour
-          Timezone = timezone
-          DeviceCount = devices
-          MaxUplinkLatencyMs = latency
-          ReportingIntervalMinutes = interval
-          ImmediateDegradationAlerts = immediateAlerts
-          PreserveEmergencyTraffic = preserveEmergency
-          RequestsPublicSafetyPreemption = preemptSafety
+          Timezone = timezone |> trimToOption
+          DeviceCount = capacityExpectation |> Option.bind parseQuantityValue
+          MaxUplinkLatencyMs = latencyExpectation |> Option.bind parseQuantityValue
+          ReportingIntervalMinutes = reportingExpectation |> Option.bind parseReportingMinutes
+          ImmediateDegradationAlerts =
+            match alertingExpectation with
+            | Some expectation ->
+                expectationTexts expectation
+                |> List.exists (containsText "immediate")
+                || true
+            | None -> false
+          PreserveEmergencyTraffic = preserveEmergencyTraffic
+          RequestsPublicSafetyPreemption = requestsPublicSafetyPreemption
           OriginalText = text }
 
     let validateTmIntent (intent: DemoTmIntent) =
@@ -403,6 +613,9 @@ module DemoScenarios =
     let private fstarDemoDir () =
         Path.Combine(demoProjectDir (), "FStarDemo")
 
+    let private fstarGeneratedDemoDir () =
+        Path.Combine(fstarDemoDir (), "generated")
+
     let private jsonBaselineSchema =
         lazy
             let schemaText = File.ReadAllText(demoSchemaPath ())
@@ -424,7 +637,8 @@ module DemoScenarios =
                reportingIntervalMinutes = intent.ReportingIntervalMinutes
                immediateDegradationAlerts = intent.ImmediateDegradationAlerts
                preserveEmergencyTraffic = intent.PreserveEmergencyTraffic
-               requestsPublicSafetyPreemption = intent.RequestsPublicSafetyPreemption |})
+               requestsPublicSafetyPreemption = intent.RequestsPublicSafetyPreemption |},
+            serializerOptions)
 
     let rec private collectJsonSchemaIssues (element: JsonElement) =
         let nested =
@@ -567,7 +781,12 @@ module DemoScenarios =
         | None -> "UnsupportedProfile"
 
     let private sanitizeModuleSegment (value: string) =
-        let sanitized = Regex.Replace(value, "[^A-Za-z0-9_]", "")
+        let sanitized =
+            value
+            |> Seq.filter (fun ch -> Char.IsLetterOrDigit ch || ch = '_')
+            |> Seq.toArray
+            |> String
+
         if String.IsNullOrWhiteSpace sanitized then "Intent" else sanitized
 
     let private renderProviderIntentRecord (intentName: string) (intent: DemoTmIntent) =
@@ -636,13 +855,15 @@ let admission_token_for_demo : admission_token selected_profile =
 
     let private runGeneratedProviderFStar moduleKey intent =
         let baseDir = fstarDemoDir ()
+        let generatedDir = fstarGeneratedDemoDir ()
         let moduleName = $"BroadcastProviderDemo.Generated{sanitizeModuleSegment moduleKey}"
-        let filePath = Path.Combine(baseDir, $"{moduleName}.fst")
+        let filePath = Path.Combine(generatedDir, $"{moduleName}.fst")
         let moduleText = buildProviderFStarModule moduleName intent
 
+        Directory.CreateDirectory(generatedDir) |> ignore
         File.WriteAllText(filePath, moduleText, Encoding.UTF8)
 
-        let arguments = $"--include \"{baseDir}\" \"{filePath}\""
+        let arguments = $"--include \"{baseDir}\" --include \"{generatedDir}\" \"{filePath}\""
         let exitCode, stdout, stderr = runProcess "fstar.exe" arguments
         let output = combineOutput stdout stderr
 
@@ -819,86 +1040,6 @@ let admission_token_for_demo : admission_token selected_profile =
           DependentAgreement = providerAgreement
           Mismatches = mismatches }
 
-    let private evaluateScenario scenarioId definition text =
-        let normalized = parseTextIntent text
-        let tmIssues = validateTmIntent normalized
-        let providerDecision = if tmIssues.IsEmpty then Some(validateProviderIntent normalized) else None
-        let providerAccepted = providerDecision |> Option.map (fun decision -> decision.Checks.IsEmpty)
-        let jsonBaseline = validateJsonBaseline normalized
-        let dependentTmWitnessFailure = tmFailedWitness normalized
-
-        let dependentTm =
-            { Accepted = dependentTmWitnessFailure.IsNone
-              Issues = tmIssues
-              FailedWitness = dependentTmWitnessFailure }
-
-        let generatedProvider = runGeneratedProviderFStar scenarioId normalized
-        let providerWitnessFailure = providerFailedWitness normalized
-
-        let dependentProviderAccepted =
-            if dependentTm.Accepted then
-                Some generatedProvider.ActualSuccess
-            else
-                None
-
-        let mismatchIssues =
-            match dependentProviderAccepted with
-            | Some accepted when accepted <> providerWitnessFailure.IsNone ->
-                [ issue
-                      "DEPENDENT_PROVIDER_MISMATCH"
-                      "The F* checker disagreed with the explainer path about provider admission. Inspect the checker excerpt in the audit details." ]
-            | _ -> []
-
-        let dependentProviderIssues =
-            (providerDecision |> Option.map (fun decision -> decision.Checks) |> Option.defaultValue [])
-            @ mismatchIssues
-
-        let dependentProvider =
-            { Accepted = dependentProviderAccepted
-              SelectedProfile = providerDecision |> Option.bind (fun decision -> decision.SelectedProfile)
-              Issues = dependentProviderIssues
-              FailedWitness = if dependentTm.Accepted then providerWitnessFailure else None
-              CheckerExcerpt = excerpt generatedProvider.Output
-              GeneratedModule = Some generatedProvider.GeneratedModule
-              AdmissionTokenType = generatedProvider.AdmissionTokenType }
-
-        let finalOutcome =
-            if not dependentTm.Accepted then
-                "rejected_tm"
-            else
-                match dependentProvider.Accepted with
-                | Some true -> "accepted"
-                | _ -> "rejected_provider"
-
-        let fstarResult =
-            match definition.FStarFile, definition.FStarExpectedSuccess with
-            | Some fileName, Some expectedSuccess -> Some(runFStarCase fileName expectedSuccess)
-            | _ -> None
-
-        let story = inferStory (Some definition) jsonBaseline dependentTm dependentProvider
-        let checks = expectationChecks definition jsonBaseline dependentTm dependentProvider
-
-        { Id = definition.Id
-          Title = definition.Title
-          Kicker = definition.Kicker
-          Text = text
-          TmAccepted = dependentTm.Accepted
-          TmIssues = tmIssues
-          NormalizedIntent = Some normalized
-          ProviderAccepted = dependentProvider.Accepted
-          ProviderDecision = providerDecision
-          ProviderFStarModule = dependentProvider.GeneratedModule
-          FinalOutcome = finalOutcome
-          FStarCase = fstarResult
-          JsonBaseline = jsonBaseline
-          DependentTm = dependentTm
-          DependentProvider = dependentProvider
-          ConstraintTrace = buildConstraintTrace normalized jsonBaseline dependentTm dependentProvider (providerWitnessFailure.IsNone)
-          Story = story
-          ExpectedJsonAccepted = definition.ExpectedJsonAccepted
-          ExpectedFailedWitness = definition.ExpectedFailedWitness
-          ExpectationChecks = checks }
-
     let private adHocDefinition text =
         { Id = "ad_hoc"
           Title = "Ad Hoc Statement"
@@ -911,6 +1052,144 @@ let admission_token_for_demo : admission_token selected_profile =
           Story = ""
           FStarFile = None
           FStarExpectedSuccess = None }
+
+    let private issuesFromDiagnostics (diagnostics: ProcessingDiagnostic list) =
+        diagnostics
+        |> List.map (fun diagnostic ->
+            let message =
+                match diagnostic.Details with
+                | Some details when not (String.IsNullOrWhiteSpace details) ->
+                    $"{diagnostic.Message} Details: {details}"
+                | _ -> diagnostic.Message
+
+            issue diagnostic.Code message)
+
+    let private distinctIssues (issues: ValidationIssue list) =
+        issues |> List.distinctBy (fun value -> value.Code, value.Message)
+
+    let private successfulExpectationChecks =
+        { JsonBaselineMatches = true
+          FailedWitnessMatches = true
+          DependentAgreement = true
+          Mismatches = [] }
+
+    let private evaluateProcessedScenario
+        (definitionOption: DemoScenarioDefinition option)
+        (moduleKey: string)
+        (text: string)
+        (record: IntentProcessingRecord) =
+        let definition =
+            definitionOption |> Option.defaultWith (fun () -> adHocDefinition text)
+
+        let normalizedIntent = record.CanonicalIntent |> Option.map (canonicalToDemoIntent text)
+        let workingIntent = normalizedIntent |> Option.defaultValue (emptyDemoIntent text)
+        let jsonBaseline = validateJsonBaseline workingIntent
+
+        let tmIssues =
+            [ match normalizedIntent with
+              | Some intent -> yield! validateTmIntent intent
+              | None ->
+                  yield
+                      issue
+                          "TM_NO_NORMALIZED_INTENT"
+                          "The live LLM pipeline did not produce a broadcast-domain normalized intent."
+              yield! issuesFromDiagnostics record.Diagnostics ]
+            |> distinctIssues
+
+        let dependentTmWitnessFailure =
+            match normalizedIntent with
+            | Some intent -> tmFailedWitness intent
+            | None -> Some "measurable_intent"
+
+        let dependentTm =
+            { Accepted = dependentTmWitnessFailure.IsNone
+              Issues = tmIssues
+              FailedWitness = dependentTmWitnessFailure }
+
+        let providerDecision =
+            if dependentTm.Accepted then
+                Some(validateProviderIntent workingIntent)
+            else
+                None
+
+        let generatedProvider =
+            normalizedIntent |> Option.map (fun _ -> runGeneratedProviderFStar moduleKey workingIntent)
+
+        let providerWitnessFailure =
+            if dependentTm.Accepted then providerFailedWitness workingIntent else None
+
+        let dependentProviderAccepted =
+            match dependentTm.Accepted, generatedProvider with
+            | true, Some generated -> Some generated.ActualSuccess
+            | _ -> None
+
+        let mismatchIssues =
+            match dependentProviderAccepted with
+            | Some accepted when accepted <> providerWitnessFailure.IsNone ->
+                [ issue
+                      "DEPENDENT_PROVIDER_MISMATCH"
+                      "The provider F* checker disagreed with the explainer path about provider admission. Inspect the checker excerpt in the audit details." ]
+            | _ -> []
+
+        let dependentProviderIssues =
+            [ yield! providerDecision |> Option.map (fun decision -> decision.Checks) |> Option.defaultValue []
+              yield! mismatchIssues ]
+            |> distinctIssues
+
+        let dependentProvider =
+            { Accepted = dependentProviderAccepted
+              SelectedProfile = providerDecision |> Option.bind (fun decision -> decision.SelectedProfile)
+              Issues = dependentProviderIssues
+              FailedWitness = if dependentTm.Accepted then providerWitnessFailure else None
+              CheckerExcerpt = generatedProvider |> Option.bind (fun result -> excerpt result.Output)
+              GeneratedModule = generatedProvider |> Option.map (fun result -> result.GeneratedModule)
+              AdmissionTokenType = generatedProvider |> Option.bind (fun result -> result.AdmissionTokenType) }
+
+        let finalOutcome =
+            if not dependentTm.Accepted then
+                "rejected_tm"
+            else
+                match dependentProvider.Accepted with
+                | Some true -> "accepted"
+                | _ -> "rejected_provider"
+
+        let fstarResult =
+            match definitionOption, definition.FStarFile, definition.FStarExpectedSuccess with
+            | Some _, Some fileName, Some expectedSuccess -> Some(runFStarCase fileName expectedSuccess)
+            | _ -> None
+
+        let story = inferStory definitionOption jsonBaseline dependentTm dependentProvider
+
+        let checks =
+            match definitionOption with
+            | Some scenario -> expectationChecks scenario jsonBaseline dependentTm dependentProvider
+            | None -> successfulExpectationChecks
+
+        { Id = definition.Id
+          Title = definition.Title
+          Kicker = definition.Kicker
+          Text = text
+          TmAccepted = dependentTm.Accepted
+          TmIssues = tmIssues
+          NormalizedIntent = normalizedIntent
+          ProviderAccepted = dependentProvider.Accepted
+          ProviderDecision = providerDecision
+          ProviderFStarModule = dependentProvider.GeneratedModule
+          FinalOutcome = finalOutcome
+          FStarCase = fstarResult
+          JsonBaseline = jsonBaseline
+          DependentTm = dependentTm
+          DependentProvider = dependentProvider
+          ConstraintTrace =
+            buildConstraintTrace workingIntent jsonBaseline dependentTm dependentProvider (providerWitnessFailure.IsNone)
+          Story = story
+          ExpectedJsonAccepted =
+            definitionOption |> Option.map (fun scenario -> scenario.ExpectedJsonAccepted) |> Option.defaultValue jsonBaseline.Accepted
+          ExpectedFailedWitness =
+            definitionOption
+            |> Option.bind (fun scenario -> scenario.ExpectedFailedWitness)
+            |> Option.orElse (dependentTm.FailedWitness |> Option.orElse dependentProvider.FailedWitness)
+          ExpectationChecks = checks }
 
     let scenarios =
         [ { Id = "broadcast_success_01"
@@ -1037,28 +1316,6 @@ let admission_token_for_demo : admission_token selected_profile =
         let filePath = Path.Combine(fstarDemoDir (), fileName)
         if File.Exists filePath then Some(File.ReadAllText filePath) else None
 
-    let runScenario (definition: DemoScenarioDefinition) : DemoScenarioResult =
-        evaluateScenario definition.Id definition definition.Text
-
-    let validateScenarioText (definition: DemoScenarioDefinition) (text: string) : DemoScenarioResult =
-        let adjusted = { definition with Text = text }
-        evaluateScenario definition.Id adjusted text
-
-    let validateText (text: string) : DemoScenarioResult =
-        let definition = adHocDefinition text
-        let result = evaluateScenario "AdHocIntent" definition text
-        let story = inferStory None result.JsonBaseline result.DependentTm result.DependentProvider
-
-        { result with
-            Story = story
-            ExpectedJsonAccepted = result.JsonBaseline.Accepted
-            ExpectedFailedWitness = result.DependentTm.FailedWitness |> Option.orElse result.DependentProvider.FailedWitness
-            ExpectationChecks =
-                { JsonBaselineMatches = true
-                  FailedWitnessMatches = true
-                  DependentAgreement = true
-                  Mismatches = [] } }
-
     let buildNaturalLanguageRequest (text: string) : IntentFvo =
         let expressionValue = JsonDocument.Parse(JsonSerializer.Serialize(text)).RootElement.Clone()
 
@@ -1081,5 +1338,41 @@ let admission_token_for_demo : admission_token selected_profile =
           BaseType = None
           SchemaLocation = None }
 
-    let runAll () =
-        scenarios |> List.map runScenario
+    let validateWithLivePipelineAsync
+        (rawIntentGenerator: IRawIntentGenerator)
+        (definitionOption: DemoScenarioDefinition option)
+        (text: string) =
+        task {
+            let intentId = $"demo-{Guid.NewGuid():N}"
+            let! outcome =
+                IntentPipeline.processIntentWithContextAsync
+                    rawIntentGenerator
+                    RawIntentGenerationContext.Live
+                    intentId
+                    (buildNaturalLanguageRequest text)
+
+            let validation =
+                evaluateProcessedScenario definitionOption outcome.ProcessingRecord.RequestId text outcome.ProcessingRecord
+
+            let definition =
+                definitionOption |> Option.defaultWith (fun () -> adHocDefinition text)
+
+            return validation, outcome.ProcessingRecord, definition
+        }
+
+    let runScenarioAsync (rawIntentGenerator: IRawIntentGenerator) (definition: DemoScenarioDefinition) =
+        task {
+            let! validation, _, _ = validateWithLivePipelineAsync rawIntentGenerator (Some definition) definition.Text
+            return validation
+        }
+
+    let runAllAsync (rawIntentGenerator: IRawIntentGenerator) =
+        task {
+            let results = ResizeArray<DemoScenarioResult>()
+
+            for scenario in scenarios do
+                let! result = runScenarioAsync rawIntentGenerator scenario
+                results.Add result
+
+            return results |> Seq.toList
+        }

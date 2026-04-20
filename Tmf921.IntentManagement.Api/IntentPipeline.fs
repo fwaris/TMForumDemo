@@ -7,7 +7,8 @@ open System.Security.Cryptography
 open System.Text
 open System.Text.Json
 open System.Text.Json.Nodes
-open System.Text.RegularExpressions
+open System.Threading
+open System.Threading.Tasks
 
 module IntentPipeline =
     type PipelineOutcome =
@@ -29,8 +30,8 @@ module IntentPipeline =
            funn = "http://www.models.tmforum.org/tio/v1.0.0/FunctionOntology#" |}
 
     let private writeIndented path value =
-        let options = JsonSerializerOptions(WriteIndented = true)
-        options.DefaultIgnoreCondition <- Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        let options = JsonSerializerOptions(serializerOptions)
+        options.WriteIndented <- true
         File.WriteAllText(path, JsonSerializer.Serialize(value, options))
 
     let private serializeElement value =
@@ -124,12 +125,12 @@ module IntentPipeline =
             tryGetPropertyString obj [ "text"; "naturalLanguage"; "utterance"; "prompt"; "value" ]
         | _ -> None
 
-    let private targetFromString targetType value =
+    let private targetFromString targetType value : CanonicalTarget =
         { Id = value
           TargetType = Some targetType
           Name = Some value }
 
-    let private mkExpectation kind subject description condition quantity =
+    let private mkExpectation kind subject description condition quantity : CanonicalExpectation =
         { Kind = kind
           Subject = subject
           Description = description
@@ -273,74 +274,66 @@ module IntentPipeline =
         root["@graph"] <- JsonArray([| intent :> JsonNode |])
         JsonDocument.Parse(root.ToJsonString()).RootElement.Clone()
 
-    let private regexGroup pattern text =
-        let matchResult = Regex.Match(text, pattern, RegexOptions.IgnoreCase)
-        if matchResult.Success then Some matchResult.Groups[1].Value else None
+    let private assembleRawIntent (request: IntentFvo) (text: string) (envelope: RawIntentParseEnvelope) =
+        let toCanonicalTarget (value: RawIntentTarget) : CanonicalTarget =
+            { Id = value.Id |> Option.defaultValue ""
+              TargetType = value.TargetType
+              Name = value.Name }
 
-    let private inferTargetsFromText text =
-        [ regexGroup @"service\s+([A-Za-z0-9\-_]+)" text |> Option.map (targetFromString "service")
-          regexGroup @"node\s+([A-Za-z0-9\-_]+)" text |> Option.map (targetFromString "node")
-          regexGroup @"region\s+([A-Za-z0-9\-_]+)" text |> Option.map (targetFromString "region") ]
-        |> List.choose id
-        |> List.distinctBy (fun target -> target.Id, target.TargetType)
+        let toCanonicalConditionClause (value: RawIntentConditionClause) : CanonicalCondition =
+            { Kind = value.Kind |> Option.defaultValue ""
+              Subject = value.Subject
+              Operator = value.Operator
+              Value = value.Value
+              Children = [] }
 
-    let private inferQuantity (text: string) : CanonicalQuantity option =
-        let quantityMatch = Regex.Match(text, @"(\d+(?:\.\d+)?)\s*(ms|milliseconds|seconds|s|minutes|min|%)", RegexOptions.IgnoreCase)
-        if quantityMatch.Success then
-            Some
-                { Value = quantityMatch.Groups[1].Value
-                  Unit = Some quantityMatch.Groups[2].Value }
-        else
-            None
+        let toCanonicalCondition (value: RawIntentCondition) : CanonicalCondition =
+            { Kind = value.Kind |> Option.defaultValue ""
+              Subject = value.Subject
+              Operator = value.Operator
+              Value = value.Value
+              Children = value.Children |> List.map toCanonicalConditionClause }
 
-    let private inferExpectationFromText (text: string) : CanonicalExpectation option =
-        let lower = text.ToLowerInvariant()
+        let toCanonicalQuantity (value: RawIntentQuantity) : CanonicalQuantity =
+            { Value = value.Value |> Option.defaultValue ""
+              Unit = value.Unit }
 
-        if lower.Contains("latency") then
-            Some (mkExpectation "PropertyExpectation" "latency" (Some text) None (inferQuantity text))
-        else if lower.Contains("packet loss") then
-            Some (mkExpectation "PropertyExpectation" "packetLoss" (Some text) None (inferQuantity text))
-        else if lower.Contains("report") then
-            Some (mkExpectation "ReportingExpectation" "intent-report" (Some text) None (inferQuantity text))
-        else if lower.Contains("redundancy") || lower.Contains("restore") || lower.Contains("availability") then
-            let condition =
-                if lower.Contains("redundancy") then
-                    Some
-                        { Kind = "Statement"
-                          Subject = Some "redundancy"
-                          Operator = Some "available"
-                          Value = Some "true"
-                          Children = [] }
-                else
-                    None
+        let toCanonicalFunctionApplication (value: RawIntentFunctionApplication) : CanonicalFunctionApplication =
+            { Name = value.Name |> Option.defaultValue ""
+              Arguments = value.Arguments }
 
-            Some (mkExpectation "DeliveryExpectation" "service-availability" (Some text) condition None)
-        else if lower.Contains("throughput") then
-            Some (mkExpectation "PropertyExpectation" "throughput" (Some text) None (inferQuantity text))
-        else
-            None
+        let toCanonicalExpectation (value: RawIntentExpectation) : CanonicalExpectation =
+            { Kind = value.Kind |> Option.defaultValue ""
+              Subject = value.Subject |> Option.defaultValue ""
+              Description = value.Description
+              Condition = value.Condition |> Option.map toCanonicalCondition
+              Quantity = value.Quantity |> Option.map toCanonicalQuantity
+              FunctionApplication = value.FunctionApplication |> Option.map toCanonicalFunctionApplication }
 
-    let private generateIrFromNl (request: IntentFvo) (text: string) : Result<CanonicalIntentIr, ProcessingDiagnostic list> =
-        let targets = inferTargetsFromText text
-        let expectation = inferExpectationFromText text
-
-        if targets.IsEmpty then
-            Error [ diagnostics "MISSING_TARGET" "The natural-language intent did not contain a recognizable target." None ]
-        else if Option.isNone expectation then
-            Error [ diagnostics "MISSING_EXPECTATION" "The natural-language intent did not contain a recognizable expectation." None ]
-        else
+        match envelope.SemanticCore with
+        | None ->
+            Error
+                [ diagnostics
+                    "SCHEMA_MISMATCH"
+                    "The parsed natural-language result did not contain semanticCore content."
+                    None ]
+        | Some semanticCore ->
             Ok
-                { IntentName = request.Name
-                  Description = request.Description |> Option.orElse (Some text)
-                  Targets = targets
-                  Expectations = [ expectation.Value ]
-                  Context = request.Context
-                  Priority = request.Priority
+                { IntentName = semanticCore.IntentName |> Option.defaultValue request.Name
+                  Description = semanticCore.Description |> Option.orElse request.Description
+                  Targets = semanticCore.Targets |> List.map toCanonicalTarget
+                  Expectations = semanticCore.Expectations |> List.map toCanonicalExpectation
+                  Context = semanticCore.Context
+                  Priority = semanticCore.Priority
                   Profile = inferProfile request
                   SourceClassification = InputKind.NaturalLanguage
                   SourceText = Some text
                   SourceIri = Some request.Expression.Iri
                   RawExpressionType = request.Expression.Type }
+
+    let private validateOntologyRawIntent (canonical: CanonicalIntentIr) =
+        JsonSerializer.SerializeToElement(canonical, serializerOptions)
+        |> RawIntentContracts.validateOntologyRawIntent
 
     let private fstarString (value: string) =
         value
@@ -458,9 +451,6 @@ module IntentPipeline =
 
         declaration, name
 
-    let private repoRoot () =
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."))
-
     let private ontologyLibraryDir () =
         Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "FStar")
 
@@ -561,7 +551,7 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
             if exitCode = 0 then
                 []
             else
-                [ diagnostics "FSTAR_CHECK_FAILED" "The generated F* module did not type-check." (Some stderr) ]
+                [ diagnostics "ONTOLOGY_CHECK_FAILED" "The generated F* module did not type-check." (Some stderr) ]
 
         { Success = (exitCode = 0)
           CheckerVersion = checkerVersion ()
@@ -573,14 +563,23 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
     let private writeRequestArtifacts
         (requestId: string)
         (rawText: string option)
-        (canonical: CanonicalIntentIr)
-        (normalizedJsonLd: JsonElement)
-        (sidecar: SidecarCheckResult) =
+        (llmPrompt: string option)
+        (llmResponse: string option)
+        (semanticCore: RawIntentSemanticCore option)
+        (ontologyRawIntent: CanonicalIntentIr option)
+        (ontologyValidationReport: JsonElement option)
+        (normalizedJsonLd: JsonElement option)
+        (sidecar: SidecarCheckResult option) =
         let directory = Path.Combine(artifactRoot (), requestId)
         Directory.CreateDirectory(directory) |> ignore
 
         let requestPath = Path.Combine(directory, "request.json")
         let rawIntentPath = Path.Combine(directory, "raw-intent.txt")
+        let llmPromptPath = Path.Combine(directory, "llm-prompt.txt")
+        let llmResponsePath = Path.Combine(directory, "llm-response.json")
+        let semanticCorePath = Path.Combine(directory, "semantic-core.json")
+        let ontologyRawIntentPath = Path.Combine(directory, "ontology-raw-intent.json")
+        let ontologyValidationReportPath = Path.Combine(directory, "ontology-validation-report.json")
         let canonicalIrPath = Path.Combine(directory, "canonical-ir.json")
         let generatedIntentPath = Path.Combine(directory, "generated-intent.fst")
         let checkResultPath = Path.Combine(directory, "check-result.json")
@@ -589,32 +588,51 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
 
         writeIndented requestPath {| requestId = requestId; generatedAt = DateTimeOffset.UtcNow |}
         rawText |> Option.iter (fun text -> File.WriteAllText(rawIntentPath, text, Encoding.UTF8))
-        writeIndented canonicalIrPath canonical
-        File.WriteAllText(normalizedIntentPath, normalizedJsonLd.GetRawText(), Encoding.UTF8)
+        llmPrompt |> Option.iter (fun text -> File.WriteAllText(llmPromptPath, text, Encoding.UTF8))
+        llmResponse |> Option.iter (fun text -> File.WriteAllText(llmResponsePath, text, Encoding.UTF8))
+        semanticCore |> Option.iter (writeIndented semanticCorePath)
 
-        if not (String.IsNullOrWhiteSpace sidecar.GeneratedModule) then
-            File.WriteAllText(generatedIntentPath, sidecar.GeneratedModule, Encoding.UTF8)
+        ontologyRawIntent
+        |> Option.iter (fun canonical ->
+            writeIndented ontologyRawIntentPath canonical
+            writeIndented canonicalIrPath canonical)
 
-        if sidecar.Success && File.Exists(generatedIntentPath) then
-            File.Copy(generatedIntentPath, checkedIntentPath, true)
+        ontologyValidationReport
+        |> Option.iter (fun report -> File.WriteAllText(ontologyValidationReportPath, report.GetRawText(), Encoding.UTF8))
 
-        writeIndented
-            checkResultPath
-            {| requestId = requestId
-               success = sidecar.Success
-               checkerVersion = sidecar.CheckerVersion
-               stdout = sidecar.Stdout
-               stderr = sidecar.Stderr
-               diagnostics = sidecar.Diagnostics
-               topLevelSymbols =
-                   [ "ontology_profile"
-                     "raw_intent_ir"
-                     "normalized_intent"
-                     "source_metadata"
-                     "checked_intent" ] |}
+        normalizedJsonLd
+        |> Option.iter (fun normalized -> File.WriteAllText(normalizedIntentPath, normalized.GetRawText(), Encoding.UTF8))
+
+        sidecar
+        |> Option.iter (fun result ->
+            if not (String.IsNullOrWhiteSpace result.GeneratedModule) then
+                File.WriteAllText(generatedIntentPath, result.GeneratedModule, Encoding.UTF8)
+
+            if result.Success && File.Exists(generatedIntentPath) then
+                File.Copy(generatedIntentPath, checkedIntentPath, true)
+
+            writeIndented
+                checkResultPath
+                {| requestId = requestId
+                   success = result.Success
+                   checkerVersion = result.CheckerVersion
+                   stdout = result.Stdout
+                   stderr = result.Stderr
+                   diagnostics = result.Diagnostics
+                   topLevelSymbols =
+                       [ "ontology_profile"
+                         "raw_intent_ir"
+                         "normalized_intent"
+                         "source_metadata"
+                         "checked_intent" ] |})
 
         { Request = toArtifactReference requestPath
           RawIntent = toArtifactReference rawIntentPath
+          LlmPrompt = toArtifactReference llmPromptPath
+          LlmResponse = toArtifactReference llmResponsePath
+          SemanticCore = toArtifactReference semanticCorePath
+          OntologyRawIntent = toArtifactReference ontologyRawIntentPath
+          OntologyValidationReport = toArtifactReference ontologyValidationReportPath
           CanonicalIr = toArtifactReference canonicalIrPath
           GeneratedIntent = toArtifactReference generatedIntentPath
           CheckResult = toArtifactReference checkResultPath
@@ -626,126 +644,275 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
             ExpressionValue = normalizedJsonLd
             Type = Some "JsonLdExpression" }
 
-    let processIntent (intentId: string) (request: IntentFvo) : PipelineOutcome =
-        let now = DateTimeOffset.UtcNow
-        let requestId = Guid.NewGuid().ToString("N")
-        let classification = classifyInput request.Expression
+    let processIntentWithContextAsync
+        (rawIntentGenerator: IRawIntentGenerator)
+        (generationContext: RawIntentGenerationContext)
+        (intentId: string)
+        (request: IntentFvo)
+        : Task<PipelineOutcome> =
+        task {
+            let now = DateTimeOffset.UtcNow
+            let requestId = Guid.NewGuid().ToString("N")
+            let classification = classifyInput request.Expression
 
-        match classification with
-        | InputKind.StructuredCanonical
-        | InputKind.StructuredNormalizable ->
-            let canonical = normalizeStructured request classification
-            let normalizedJsonLd = emitJsonLd canonical
+            match classification with
+            | InputKind.StructuredCanonical
+            | InputKind.StructuredNormalizable ->
+                let canonical = normalizeStructured request classification
+                let normalizedJsonLd = emitJsonLd canonical
+                let artifacts =
+                    writeRequestArtifacts
+                        requestId
+                        None
+                        None
+                        None
+                        None
+                        (Some canonical)
+                        None
+                        (Some normalizedJsonLd)
+                        None
 
-            let sidecarResult =
-                { Success = true
-                  CheckerVersion = None
-                  GeneratedModule = ""
-                  Stdout = ""
-                  Stderr = ""
-                  Diagnostics = [] }
+                return
+                    { NormalizedExpression = normalizedExpression request normalizedJsonLd
+                      ProcessingRecord =
+                        { IntentId = intentId
+                          RequestId = requestId
+                          Classification = classification
+                          Status =
+                            if classification = InputKind.StructuredCanonical
+                            then ProcessingStatus.Bypassed
+                            else ProcessingStatus.Normalized
+                          Profile = canonical.Profile
+                          CanonicalIntent = Some canonical
+                          NormalizedJsonLd = Some normalizedJsonLd
+                          CheckedFStarModule = None
+                          LlmParse = None
+                          Artifacts = Some artifacts
+                          Diagnostics = []
+                          CheckerVersion = None
+                          CreatedAt = now
+                          UpdatedAt = now } }
+            | InputKind.NaturalLanguage ->
+                match extractNaturalLanguageText request.Expression with
+                | None ->
+                    return
+                        { NormalizedExpression = request.Expression
+                          ProcessingRecord =
+                            { IntentId = intentId
+                              RequestId = requestId
+                              Classification = InputKind.NaturalLanguage
+                              Status = ProcessingStatus.ClarificationRequired
+                              Profile = inferProfile request
+                              CanonicalIntent = None
+                              NormalizedJsonLd = None
+                              CheckedFStarModule = None
+                              LlmParse = None
+                              Artifacts = None
+                              Diagnostics = [ diagnostics "MISSING_TEXT" "The natural-language input was empty." None ]
+                              CheckerVersion = None
+                              CreatedAt = now
+                              UpdatedAt = now } }
+                | Some text ->
+                    let! generated =
+                        rawIntentGenerator.GenerateSemanticCoreAsync(generationContext, text, CancellationToken.None)
 
-            let artifacts = writeRequestArtifacts requestId None canonical normalizedJsonLd sidecarResult
+                    let rawSemanticCore =
+                        generated.Envelope |> Option.bind (fun envelope -> envelope.SemanticCore)
 
-            { NormalizedExpression = normalizedExpression request normalizedJsonLd
-              ProcessingRecord =
-                { IntentId = intentId
-                  RequestId = requestId
-                  Classification = classification
-                  Status =
-                    if classification = InputKind.StructuredCanonical
-                    then ProcessingStatus.Bypassed
-                    else ProcessingStatus.Normalized
-                  Profile = canonical.Profile
-                  CanonicalIntent = Some canonical
-                  NormalizedJsonLd = Some normalizedJsonLd
-                  CheckedFStarModule = None
-                  Artifacts = Some artifacts
-                  Diagnostics = []
-                  CheckerVersion = None
-                  CreatedAt = now
-                  UpdatedAt = now } }
-        | InputKind.NaturalLanguage ->
-            match extractNaturalLanguageText request.Expression with
-            | None ->
-                { NormalizedExpression = request.Expression
-                  ProcessingRecord =
-                    { IntentId = intentId
-                      RequestId = requestId
-                      Classification = InputKind.NaturalLanguage
-                      Status = ProcessingStatus.ClarificationRequired
-                      Profile = inferProfile request
-                      CanonicalIntent = None
-                      NormalizedJsonLd = None
-                      CheckedFStarModule = None
-                      Artifacts = None
-                      Diagnostics = [ diagnostics "MISSING_TEXT" "The natural-language input was empty." None ]
-                      CheckerVersion = None
-                      CreatedAt = now
-                      UpdatedAt = now } }
-            | Some text ->
-                match generateIrFromNl request text with
-                | Error diags ->
+                    match generated.Envelope with
+                    | Some envelope when envelope.Status = "parsed" ->
+                        match assembleRawIntent request text envelope with
+                        | Error diags ->
+                            let artifacts =
+                                writeRequestArtifacts
+                                    requestId
+                                    (Some text)
+                                    generated.PromptText
+                                    generated.RawResponseText
+                                    rawSemanticCore
+                                    None
+                                    None
+                                    None
+                                    None
+
+                            return
+                                { NormalizedExpression = request.Expression
+                                  ProcessingRecord =
+                                    { IntentId = intentId
+                                      RequestId = requestId
+                                      Classification = InputKind.NaturalLanguage
+                                      Status = ProcessingStatus.ClarificationRequired
+                                      Profile = inferProfile request
+                                      CanonicalIntent = None
+                                      NormalizedJsonLd = None
+                                      CheckedFStarModule = None
+                                      LlmParse = Some generated.Metadata
+                                      Artifacts = Some artifacts
+                                      Diagnostics = generated.Diagnostics @ diags
+                                      CheckerVersion = None
+                                      CreatedAt = now
+                                      UpdatedAt = now } }
+                        | Ok canonical ->
+                            let ontologyValidation = validateOntologyRawIntent canonical
+
+                            if not ontologyValidation.Accepted then
+                                let artifacts =
+                                    writeRequestArtifacts
+                                        requestId
+                                        (Some text)
+                                        generated.PromptText
+                                        generated.RawResponseText
+                                        rawSemanticCore
+                                        (Some canonical)
+                                        (Some ontologyValidation.Report)
+                                        None
+                                        None
+
+                                return
+                                    { NormalizedExpression = request.Expression
+                                      ProcessingRecord =
+                                        { IntentId = intentId
+                                          RequestId = requestId
+                                          Classification = InputKind.NaturalLanguage
+                                          Status = ProcessingStatus.ClarificationRequired
+                                          Profile = canonical.Profile
+                                          CanonicalIntent = Some canonical
+                                          NormalizedJsonLd = None
+                                          CheckedFStarModule = None
+                                          LlmParse = Some generated.Metadata
+                                          Artifacts = Some artifacts
+                                          Diagnostics = generated.Diagnostics @ ontologyValidation.Issues
+                                          CheckerVersion = None
+                                          CreatedAt = now
+                                          UpdatedAt = now } }
+                            else
+                                let normalizedJsonLd = emitJsonLd canonical
+                                let moduleName = $"CheckedIntent_{requestId}"
+                                let generatedPath = Path.Combine(Path.Combine(artifactRoot (), requestId), $"{moduleName}.fst")
+                                Directory.CreateDirectory(Path.GetDirectoryName(generatedPath)) |> ignore
+                                let sidecar = runFStarCheck generatedPath canonical
+
+                                let artifacts =
+                                    writeRequestArtifacts
+                                        requestId
+                                        (Some text)
+                                        generated.PromptText
+                                        generated.RawResponseText
+                                        rawSemanticCore
+                                        (Some canonical)
+                                        (Some ontologyValidation.Report)
+                                        (if sidecar.Success then Some normalizedJsonLd else None)
+                                        (Some sidecar)
+
+                                return
+                                    { NormalizedExpression =
+                                        if sidecar.Success then normalizedExpression request normalizedJsonLd else request.Expression
+                                      ProcessingRecord =
+                                        { IntentId = intentId
+                                          RequestId = requestId
+                                          Classification = InputKind.NaturalLanguage
+                                          Status =
+                                            if sidecar.Success
+                                            then ProcessingStatus.Checked
+                                            else ProcessingStatus.ClarificationRequired
+                                          Profile = canonical.Profile
+                                          CanonicalIntent = Some canonical
+                                          NormalizedJsonLd = if sidecar.Success then Some normalizedJsonLd else None
+                                          CheckedFStarModule = if sidecar.Success then Some sidecar.GeneratedModule else None
+                                          LlmParse = Some generated.Metadata
+                                          Artifacts = Some artifacts
+                                          Diagnostics = generated.Diagnostics @ sidecar.Diagnostics
+                                          CheckerVersion = sidecar.CheckerVersion
+                                          CreatedAt = now
+                                          UpdatedAt = now } }
+                    | Some envelope ->
+                        let artifacts =
+                            writeRequestArtifacts
+                                requestId
+                                (Some text)
+                                generated.PromptText
+                                generated.RawResponseText
+                                rawSemanticCore
+                                None
+                                None
+                                None
+                                None
+
+                        return
+                            { NormalizedExpression = request.Expression
+                              ProcessingRecord =
+                                { IntentId = intentId
+                                  RequestId = requestId
+                                  Classification = InputKind.NaturalLanguage
+                                  Status = ProcessingStatus.ClarificationRequired
+                                  Profile = inferProfile request
+                                  CanonicalIntent = None
+                                  NormalizedJsonLd = None
+                                  CheckedFStarModule = None
+                                  LlmParse = Some generated.Metadata
+                                  Artifacts = Some artifacts
+                                  Diagnostics = generated.Diagnostics
+                                  CheckerVersion = None
+                                  CreatedAt = now
+                                  UpdatedAt = now } }
+                    | None ->
+                        let artifacts =
+                            writeRequestArtifacts
+                                requestId
+                                (Some text)
+                                generated.PromptText
+                                generated.RawResponseText
+                                None
+                                None
+                                None
+                                None
+                                None
+
+                        return
+                            { NormalizedExpression = request.Expression
+                              ProcessingRecord =
+                                { IntentId = intentId
+                                  RequestId = requestId
+                                  Classification = InputKind.NaturalLanguage
+                                  Status = ProcessingStatus.ClarificationRequired
+                                  Profile = inferProfile request
+                                  CanonicalIntent = None
+                                  NormalizedJsonLd = None
+                                  CheckedFStarModule = None
+                                  LlmParse = Some generated.Metadata
+                                  Artifacts = Some artifacts
+                                  Diagnostics = generated.Diagnostics
+                                  CheckerVersion = None
+                                  CreatedAt = now
+                                  UpdatedAt = now } }
+            | InputKind.Ambiguous
+            | _ ->
+                return
                     { NormalizedExpression = request.Expression
                       ProcessingRecord =
                         { IntentId = intentId
                           RequestId = requestId
-                          Classification = InputKind.NaturalLanguage
+                          Classification = InputKind.Ambiguous
                           Status = ProcessingStatus.ClarificationRequired
                           Profile = inferProfile request
                           CanonicalIntent = None
                           NormalizedJsonLd = None
                           CheckedFStarModule = None
+                          LlmParse = None
                           Artifacts = None
-                          Diagnostics = diags
+                          Diagnostics =
+                            [ diagnostics
+                                "AMBIGUOUS_INPUT"
+                                "The expression was neither recognizable JSON-LD nor recognizable natural language."
+                                None ]
                           CheckerVersion = None
                           CreatedAt = now
                           UpdatedAt = now } }
-                | Ok canonical ->
-                    let normalizedJsonLd = emitJsonLd canonical
-                    let moduleName = $"CheckedIntent_{requestId}"
-                    let generatedPath = Path.Combine(Path.Combine(artifactRoot (), requestId), $"{moduleName}.fst")
-                    Directory.CreateDirectory(Path.GetDirectoryName(generatedPath)) |> ignore
-                    let sidecar = runFStarCheck generatedPath canonical
-                    let artifacts = writeRequestArtifacts requestId (Some text) canonical normalizedJsonLd sidecar
+        }
 
-                    { NormalizedExpression =
-                        if sidecar.Success then normalizedExpression request normalizedJsonLd else request.Expression
-                      ProcessingRecord =
-                        { IntentId = intentId
-                          RequestId = requestId
-                          Classification = InputKind.NaturalLanguage
-                          Status =
-                            if sidecar.Success
-                            then ProcessingStatus.Checked
-                            else ProcessingStatus.Failed
-                          Profile = canonical.Profile
-                          CanonicalIntent = Some canonical
-                          NormalizedJsonLd = Some normalizedJsonLd
-                          CheckedFStarModule = if sidecar.Success then Some sidecar.GeneratedModule else None
-                          Artifacts = Some artifacts
-                          Diagnostics = sidecar.Diagnostics
-                          CheckerVersion = sidecar.CheckerVersion
-                          CreatedAt = now
-                          UpdatedAt = now } }
-        | InputKind.Ambiguous
-        | _ ->
-            { NormalizedExpression = request.Expression
-              ProcessingRecord =
-                { IntentId = intentId
-                  RequestId = requestId
-                  Classification = InputKind.Ambiguous
-                  Status = ProcessingStatus.ClarificationRequired
-                  Profile = inferProfile request
-                  CanonicalIntent = None
-                  NormalizedJsonLd = None
-                  CheckedFStarModule = None
-                  Artifacts = None
-                  Diagnostics =
-                    [ diagnostics
-                        "AMBIGUOUS_INPUT"
-                        "The expression was neither recognizable JSON-LD nor recognizable natural language."
-                        None ]
-                  CheckerVersion = None
-                  CreatedAt = now
-                  UpdatedAt = now } }
+    let processIntentAsync
+        (rawIntentGenerator: IRawIntentGenerator)
+        (intentId: string)
+        (request: IntentFvo)
+        : Task<PipelineOutcome> =
+        processIntentWithContextAsync rawIntentGenerator RawIntentGenerationContext.Live intentId request

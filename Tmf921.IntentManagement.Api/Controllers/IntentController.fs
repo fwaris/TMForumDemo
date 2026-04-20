@@ -3,13 +3,20 @@ namespace Tmf921.IntentManagement.Api.Controllers
 open System
 open System.Text.Json
 open System.Text.Json.Nodes
+open System.Text.Json.Serialization
+open System.Threading.Tasks
 open Microsoft.AspNetCore.Mvc
 open Microsoft.Extensions.Logging
 open Tmf921.IntentManagement.Api
 
 [<ApiController>]
 [<Route(ApiRouteTemplates.IntentCollection)>]
-type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogger<IntentController>) =
+type IntentController(
+    store: IIntentStore,
+    shellStore: ShellStore,
+    rawIntentGenerator: IRawIntentGenerator,
+    logger: ILogger<IntentController>
+) =
     inherit ControllerBase()
 
     let badRequest code reason message =
@@ -46,12 +53,6 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
             | JsonValueKind.String -> Some (value.GetValue<string>())
             | _ -> Some (value.ToJsonString())
 
-    let nodeBool (body: JsonObject) (name: string) =
-        match body[name] with
-        | :? JsonValue as value ->
-            try Some (value.GetValue<bool>()) with _ -> None
-        | _ -> None
-
     let nodeExpression (body: JsonObject) =
         match body["expression"] with
         | :? JsonObject as expr ->
@@ -81,26 +82,6 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
           Description = nodeString body "description"
           ValidFor = None
           IsBundle = None
-          Priority = nodeString body "priority"
-          Context = nodeString body "context"
-          Version = nodeString body "version"
-          IntentSpecification = None
-          LifecycleStatus = nodeString body "lifecycleStatus"
-          Type = nodeString body "@type"
-          BaseType = nodeString body "@baseType"
-          SchemaLocation = nodeString body "@schemaLocation" }
-
-    let patchFromJson (payload: JsonElement) : IntentMvo =
-        let body =
-            match JsonNode.Parse(payload.GetRawText()) with
-            | :? JsonObject as o -> o
-            | _ -> JsonObject()
-
-        { Name = nodeString body "name"
-          Expression = nodeExpression body
-          Description = nodeString body "description"
-          ValidFor = None
-          IsBundle = nodeBool body "isBundle"
           Priority = nodeString body "priority"
           Context = nodeString body "context"
           Version = nodeString body "version"
@@ -173,61 +154,75 @@ type IntentController(store: IIntentStore, shellStore: ShellStore, logger: ILogg
         | false, _ -> base.NotFound(notFound id) :> IActionResult
 
     [<HttpPost>]
-    member this.Create([<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : IActionResult =
-        let request = requestFromJson payload
-        let id = Guid.NewGuid().ToString("N")
-        let routeValues = ApiLinks.routeValues [ "id", box id ]
-        let resourceHref =
-            ApiLinks.linkOrPath this ApiRouteNames.IntentGetById routeValues (ApiRoutePaths.intentItem id)
-        let processing = IntentPipeline.processIntent id request
-        let now = DateTimeOffset.UtcNow
-        let resource =
-            toResource resourceHref id now { request with Expression = processing.NormalizedExpression }
-        let created = store.Create resource
-        shellStore.ProcessingRecords[id] <- processing.ProcessingRecord
-        logger.LogInformation("Created TMF921 intent {IntentId} with name {IntentName}", created.Id, created.Name)
-        this.CreatedAtRoute(ApiRouteNames.IntentGetById, routeValues, selectFields fields created) :> IActionResult
+    member this.Create([<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : Task<IActionResult> =
+        task {
+            let request = requestFromJson payload
+            let id = Guid.NewGuid().ToString("N")
+            let routeValues = ApiLinks.routeValues [ "id", box id ]
+            let resourceHref =
+                ApiLinks.linkOrPath this ApiRouteNames.IntentGetById routeValues (ApiRoutePaths.intentItem id)
+            let! processing = IntentPipeline.processIntentAsync rawIntentGenerator id request
+            let now = DateTimeOffset.UtcNow
+            let resource =
+                toResource resourceHref id now { request with Expression = processing.NormalizedExpression }
+            let created = store.Create resource
+            shellStore.ProcessingRecords[id] <- processing.ProcessingRecord
+            logger.LogInformation("Created TMF921 intent {IntentId} with name {IntentName}", created.Id, created.Name)
+            return this.CreatedAtRoute(ApiRouteNames.IntentGetById, routeValues, selectFields fields created) :> IActionResult
+        }
 
     [<HttpPatch("{id}")>]
-    member this.Patch(id: string, [<FromBody>] payload: JsonElement, [<FromQuery>] fields: string) : IActionResult =
-        let patch = patchFromJson payload
-        match store.TryGet id with
-        | None -> base.NotFound(notFound id) :> IActionResult
-        | Some existing ->
-            let mergedRequest : IntentFvo =
-                { (toRequestFromResource existing) with
-                    Name = patch.Name |> Option.defaultValue existing.Name
-                    Expression = patch.Expression |> Option.defaultValue existing.Expression
-                    Description = patch.Description |> Option.orElse existing.Description
-                    ValidFor = patch.ValidFor |> Option.orElse existing.ValidFor
-                    IsBundle =
-                        match patch.IsBundle with
-                        | Some value -> Some value
-                        | None -> existing.IsBundle
-                    Priority = patch.Priority |> Option.orElse existing.Priority
-                    Context = patch.Context |> Option.orElse existing.Context
-                    Version = patch.Version |> Option.orElse existing.Version
-                    IntentSpecification = patch.IntentSpecification |> Option.orElse existing.IntentSpecification
-                    LifecycleStatus = patch.LifecycleStatus |> Option.orElse (Some existing.LifecycleStatus)
-                    Type = patch.Type |> Option.orElse (Some existing.Type)
-                    BaseType = patch.BaseType |> Option.orElse existing.BaseType
-                    SchemaLocation = patch.SchemaLocation |> Option.orElse existing.SchemaLocation }
+    member this.Patch(id: string, [<FromBody>] patch: IntentMvo, [<FromQuery>] fields: string) : Task<IActionResult> =
+        task {
+            match store.TryGet id with
+            | None -> return this.NotFound(notFound id) :> IActionResult
+            | Some existing ->
+                let mergedRequest : IntentFvo =
+                    { (toRequestFromResource existing) with
+                        Name = Domain.applySkippableValue existing.Name patch.Name
+                        Expression =
+                            patch.Expression
+                            |> Domain.tryGetSkippableValue
+                            |> Option.defaultValue existing.Expression
+                        Description = Domain.applySkippableOption existing.Description patch.Description
+                        ValidFor = Domain.applySkippableOption existing.ValidFor patch.ValidFor
+                        IsBundle = Domain.applySkippableOption existing.IsBundle patch.IsBundle
+                        Priority = Domain.applySkippableOption existing.Priority patch.Priority
+                        Context = Domain.applySkippableOption existing.Context patch.Context
+                        Version = Domain.applySkippableOption existing.Version patch.Version
+                        IntentSpecification =
+                            Domain.applySkippableOption existing.IntentSpecification patch.IntentSpecification
+                        LifecycleStatus =
+                            Domain.applySkippableValue existing.LifecycleStatus patch.LifecycleStatus |> Some
+                        Type = Domain.applySkippableValue existing.Type patch.Type |> Some
+                        BaseType = Domain.applySkippableOption existing.BaseType patch.BaseType
+                        SchemaLocation = Domain.applySkippableOption existing.SchemaLocation patch.SchemaLocation }
 
-            let processing =
-                match patch.Expression with
-                | Some _ -> Some (IntentPipeline.processIntent id mergedRequest)
-                | None -> None
+                let! processing =
+                    task {
+                        match Domain.tryGetSkippableValue patch.Expression with
+                        | Some _ ->
+                            let! outcome = IntentPipeline.processIntentAsync rawIntentGenerator id mergedRequest
+                            return Some outcome
+                        | None ->
+                            return None
+                    }
 
-            let effectivePatch =
-                { patch with
-                    Expression = processing |> Option.map (fun outcome -> outcome.NormalizedExpression) }
+                let effectivePatch =
+                    { patch with
+                        Expression =
+                            match processing with
+                            | Some outcome -> Skippable.Include outcome.NormalizedExpression
+                            | None -> patch.Expression }
 
-            match store.Patch(id, effectivePatch) with
-            | Some updated ->
-                processing |> Option.iter (fun outcome -> shellStore.ProcessingRecords[id] <- outcome.ProcessingRecord)
-                logger.LogInformation("Patched TMF921 intent {IntentId}", id)
-                base.Ok(selectFields fields updated) :> IActionResult
-            | None -> base.NotFound(notFound id) :> IActionResult
+                match store.Patch(id, effectivePatch) with
+                | Some updated ->
+                    processing |> Option.iter (fun outcome -> shellStore.ProcessingRecords[id] <- outcome.ProcessingRecord)
+                    logger.LogInformation("Patched TMF921 intent {IntentId}", id)
+                    return this.Ok(selectFields fields updated) :> IActionResult
+                | None ->
+                    return this.NotFound(notFound id) :> IActionResult
+        }
 
     [<HttpDelete("{id}")>]
     member _.Delete(id: string) : IActionResult =
