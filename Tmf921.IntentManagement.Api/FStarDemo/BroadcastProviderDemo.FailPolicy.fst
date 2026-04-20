@@ -19,8 +19,26 @@ let unsafe_policy_intent : tm_intent =
     preserve_emergency_traffic = false;
     request_public_safety_preemption = true }
 
+let selected_profile : profile =
+  LiveBroadcastGold
+
+let measurable : measurable_intent unsafe_policy_intent =
+  mk_measurable unsafe_policy_intent
+
+let window_checked : window_checked_intent unsafe_policy_intent =
+  mk_window_checked unsafe_policy_intent
+
 let tm_checked : tm_checked_intent unsafe_policy_intent =
   mk_tm_checked unsafe_policy_intent
 
-let provider_checked : provider_checked_intent unsafe_policy_intent =
-  mk_provider_checked unsafe_policy_intent
+let profiled : profiled_intent selected_profile unsafe_policy_intent =
+  mk_profiled selected_profile unsafe_policy_intent
+
+let capacity_checked : capacity_checked_intent selected_profile unsafe_policy_intent =
+  mk_capacity_checked selected_profile unsafe_policy_intent
+
+let latency_checked : latency_checked_intent selected_profile unsafe_policy_intent =
+  mk_latency_checked selected_profile unsafe_policy_intent
+
+let policy_checked : policy_checked_intent selected_profile unsafe_policy_intent =
+  mk_policy_checked selected_profile unsafe_policy_intent

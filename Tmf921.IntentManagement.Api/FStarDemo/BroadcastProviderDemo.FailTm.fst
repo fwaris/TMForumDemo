@@ -19,5 +19,5 @@ let vague_intent : tm_intent =
     preserve_emergency_traffic = false;
     request_public_safety_preemption = false }
 
-let tm_checked : tm_checked_intent vague_intent =
-  mk_tm_checked vague_intent
+let measurable : measurable_intent vague_intent =
+  mk_measurable vague_intent

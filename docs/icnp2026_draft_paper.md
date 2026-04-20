@@ -1,4 +1,4 @@
-# Toward Safe Natural-Language Intent Admission for Autonomous Networks: A TMF921-to-F* Shell for Verified Provider Constraints
+# Dependently Typed Validation of Natural-Language Intents for Autonomous Networks
 
 **Authors:** Faisal Waris et al.  
 **Target venue:** IEEE ICNP 2026  
@@ -6,11 +6,20 @@
 
 ## Abstract
 
-Autonomous and AI-assisted networks increasingly expose intent interfaces to operations teams, service orchestrators, and potentially software agents. This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they are also ambiguous, under-specified, and difficult to validate against provider-specific operational constraints. If such intents are admitted too early into orchestration pipelines, downstream automation can violate policy, over-request resources, or issue unsafe actions.
+Natural language (NL) intents will be increasingly the control mechanism of 5G/6G autonomous telecom networks. 
 
-This paper presents a prototype intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API. The shell accepts structured and natural-language intent expressions, classifies the input, normalizes admissible requests into a canonical intermediate representation and JSON-LD form, and emits machine-checkable artifacts that can be validated using F*. Our design separates two safety gates: a telecom-management gate that checks whether a request is sufficiently specific to qualify as a valid intent, and a provider-admission gate that checks whether the resulting request satisfies venue-, profile-, and policy-specific constraints. We instantiate the approach on a live-broadcast connectivity scenario and show how success and failure cases can be captured as explicit proof obligations, including capacity violations, unrealistic latency requests, and protected-traffic policy violations.
+Example: "Provide an ultra-reliable low-latency 5G service for telemedicine and critical care operations at Mayo Clinic on an ongoing basis. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms ...".
 
-The prototype demonstrates a practical middle ground between free-form LLM-driven intent capture and brittle schema-only validation. Rather than directly trusting generated actions, the shell narrows natural-language requests into a typed intent model, preserves sidecar evidence for auditability, and rejects under-specified or unsafe requests before provider execution. We argue that this architecture is a useful safety pattern for intent-driven autonomous networks and a promising bridge between standards-based intent APIs and formally checked admission control.
+This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they can be ambiguous, under-specified, and may not validate against additional provider-specific operational constraints. 
+
+This paper presents a prototype, high-assurance, intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API. TM921 serves as 'front door' for NL intents and as such imposes the minimal semantic requirements via the TR292 OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by TR292.
+
+This paper shows how NL intents may be trusted -- with almost provably-correct levels of assurance -- using formal verification systems rooted in dependently-typed languages. First (offline) the TR292 ontology is converted to the equivalent dependent types of the F* language. These serve as propositions against which incoming intents may be checked. Then (online) received natural-language intents are translated by a Large Language Model (LLM) to F* code that is validated (type-checked) against the TR292 dependent types, by the F* proof checker. Only validated intents are admitted.
+
+Further, since TMF921 structure-imposition is necessarily generic, we demo provider-specific intent validation as further refinements of the TR292 types. 
+
+It is observed that valid intents are translated and validated with high reliability. Specifically, the LLM (GPT-5.4) produces correct F* code in approximately 99% of cases on the first attempt, and achieves 100% correctness with a single retry. These results suggest that the apparent non-determinism of natural language and LLM-generated outputs can be effectively mitigated through dependent-type–based validation.
+
 
 ## 1. Introduction
 
@@ -22,7 +31,7 @@ First, many requests that sound operationally reasonable are not actually valid 
 
 These concerns are particularly relevant to autonomous networks, where intent interfaces may be consumed not only by humans but by software agents acting on behalf of NOCs, orchestration systems, and vertical applications. A useful architecture therefore needs to do more than parse an utterance. It must classify the input source, determine whether the request is specific enough to act on, normalize it into a stable machine representation, and surface proof-relevant constraints before provisioning decisions are made.
 
-This paper describes a prototype shell around the TM Forum TMF921 Intent Management API that addresses this admission problem. The shell is implemented in F# as an API-facing mediation layer and paired with F* models that encode validity predicates over normalized intents. The system accepts TMF921-style `Intent_FVO` payloads; classifies each expression as structured canonical, structured normalizable, natural language, or ambiguous; emits a canonical intent intermediate representation; and records sidecar artifacts including normalized JSON-LD, generated F* modules, checker diagnostics, and hashes for traceability.
+This paper describes a prototype shell around the TM Forum TMF921 Intent Management API that addresses this admission problem. The shell is implemented in F# as an API-facing mediation layer and paired with F* models that encode validity predicates over normalized intents. The system accepts TMF921-style `Intent_FVO` payloads; classifies each expression as structured canonical, structured normalizable, natural language, or ambiguous; emits a canonical intent intermediate representation; and records sidecar artifacts including normalized JSON-LD, generated F* modules, checker diagnostics, and hashes for traceability. For the live demo and scenario sweep, the shell also compares those typed checks against a repo-local JSON Schema baseline so that the value of dependent types is visible rather than assumed.
 
 Our argument is not that formal methods alone solve autonomous-network safety, nor that natural-language interfaces should be avoided. Instead, we argue for a narrow and practical claim: the boundary between intent ingestion and provider execution is the right place to combine standards-aligned API handling, semantic normalization, and machine-checked admissibility tests.
 
@@ -31,9 +40,9 @@ Our argument is not that formal methods alone solve autonomous-network safety, n
 This draft advances the following contributions:
 
 1. A standards-aligned intent-admission architecture built around TMF921 that accepts both structured and natural-language intent expressions.
-2. A two-stage validation model that separates telecom-management validity from provider-specific admissibility.
-3. A prototype implementation that emits auditable sidecar artifacts, including canonical IR, normalized JSON-LD, generated F* modules, diagnostics, and checker output.
-4. A worked case study for live-broadcast connectivity showing how capacity, latency, reporting, and protected-traffic constraints can be encoded as machine-checkable properties.
+2. A staged validation model that contrasts JSON shape validation with composable TM and provider witnesses.
+3. A prototype implementation that emits auditable sidecar artifacts, including canonical IR, normalized JSON-LD, generated F* modules, diagnostics, checker output, and witness-stage traces.
+4. A worked case study for live-broadcast connectivity showing how capacity, latency, reporting, window sanity, and protected-traffic constraints can be encoded as machine-checkable properties.
 5. A discussion of why this pattern is useful for safe autonomous networks, especially when upstream requests may be produced by LLMs or agents.
 
 ## 2. Motivation and Problem Statement
@@ -164,7 +173,7 @@ Each profile defines resource and policy bounds, including:
 - preservation of emergency-service traffic,
 - and prohibition on preempting reserved public-safety capacity.
 
-These predicates are encoded in F* as functions over a typed `tm_intent` record. Success cases inhabit refined types such as `tm_checked_intent` and `provider_checked_intent`, while invalid cases fail to construct such witnesses.
+These predicates are encoded in F* as functions over a typed `tm_intent` record. Success cases inhabit a staged sequence of refined types including `measurable_intent`, `window_checked_intent`, `tm_checked_intent`, `profiled_intent p`, `capacity_checked_intent p`, `latency_checked_intent p`, `policy_checked_intent p`, and `provider_checked_intent p`. When all stages succeed, the system can additionally construct an `admission_token p`, making the downstream consequence of acceptance explicit.
 
 ### 5.3 Why Two Gates Matter
 
@@ -187,18 +196,20 @@ The main implementation components are:
 - a TMF921 shell API for intent resources,
 - a domain model for TMF921-like resources and processing metadata,
 - an intent pipeline for classification, normalization, JSON-LD emission, and artifact generation,
-- a demo scenario layer that parses selected natural-language requests into a typed domain record,
-- and F* modules that encode TM-level and provider-level validity predicates.
+- a demo scenario layer that parses selected natural-language requests into a typed domain record and compares them against a JSON Schema baseline,
+- and F* modules that encode staged TM-level and provider-level validity predicates that culminate in a typed admission token.
 
 ### 6.2 Example Scenario Family
 
 The current case study uses live-broadcast service requests for event venues. The repository includes:
 
-- one success case,
-- one capacity-failure case,
-- one latency-failure case,
-- one policy-failure case,
-- and one TM-level under-specification case.
+- an end-to-end success case,
+- a reversed-window case that passes JSON validation but fails TM witness construction,
+- a capacity-failure case,
+- a latency-failure case,
+- a policy-failure case,
+- a same-shape different-profile pair for Detroit Stadium and Metro Arena,
+- and a TM-level under-specification case.
 
 These cases exercise distinct failure modes that are common in autonomous-network settings:
 
@@ -233,33 +244,38 @@ The current draft addresses the following questions:
 
 ### 7.2 Method
 
-We evaluate the prototype using the live-broadcast scenario family included in the repository. Each scenario begins as a natural-language service request. The shell parses and normalizes the text into a typed telecom-management intent, after which F* validity predicates are used to determine whether the request can be admitted at TM level and provider level.
+We evaluate the prototype using the live-broadcast scenario family included in the repository. Each scenario begins as a natural-language service request. The shell parses and normalizes the text into a typed telecom-management intent, then runs two validation lanes over the same normalized object: a JSON Schema baseline for shape-oriented checks and an F* lane for staged witness construction.
 
-The scenario suite currently contains five representative cases:
+The scenario suite currently contains eight representative cases:
 
 1. a valid request that should pass both gates,
-2. a request whose device count exceeds venue capacity,
-3. a request whose latency target is below the provider's admissible bound,
-4. a request whose policy would violate protected public-safety rules,
-5. and a vague request that should fail TM-level normalization.
+2. a reversed-window request that is structurally complete but semantically invalid,
+3. a request whose device count exceeds venue capacity,
+4. a request whose latency target is below the provider's admissible bound,
+5. a request whose policy would violate protected public-safety rules,
+6. a Detroit Stadium request that passes under the Gold profile,
+7. a Metro Arena request with the same JSON shape that fails under the Silver profile,
+8. and a vague request that should fail TM-level normalization.
 
 ### 7.3 Expected Outcomes
 
 The intended outcomes are:
 
-- the success case yields both a TM-valid and provider-valid witness,
-- the capacity, latency, and policy cases are TM-valid but provider-invalid,
-- the vague request is rejected before provider admission.
+- the success case yields both a TM-valid and provider-valid witness and produces an admission token,
+- the reversed-window case passes JSON validation but fails at `window_checked_intent`,
+- the capacity, latency, and policy cases pass JSON validation and TM witness construction but fail at distinct provider witnesses,
+- the Detroit/Metro pair shows that the same JSON shape can be accepted or rejected depending on the resolved provider profile,
+- and the vague request is rejected before provider admission.
 
-These outcomes matter because they show that the model rejects unsafe requests for different reasons at different layers, instead of collapsing all failures into generic parsing errors.
+These outcomes matter because they show that the model rejects unsafe requests for different reasons at different layers, instead of collapsing all failures into generic parsing errors. More importantly, they make the comparison against schema validation explicit: several cases remain JSON-valid yet still fail to inhabit the domain-specific witness required for execution.
 
 ### 7.4 What We Can Claim Today
 
 At the current stage, the prototype supports three credible claims:
 
 1. A standards-aligned intent shell can preserve a clean separation between API acceptance and provider admission.
-2. Provider constraints that matter to safety and reliability can be captured as explicit, machine-checkable predicates over normalized intents.
-3. Natural-language intent capture can be made more trustworthy when paired with typed normalization and retained evidence artifacts.
+2. Provider constraints that matter to safety and reliability can be captured as explicit, machine-checkable predicates over normalized intents, and exposed as the first failed witness in a staged refinement chain.
+3. Natural-language intent capture can be made more trustworthy when paired with typed normalization and retained evidence artifacts, especially when compared directly against a schema-only baseline.
 
 ### 7.5 What Still Needs to Be Added
 
@@ -268,7 +284,7 @@ For a submission-ready version, this section should be strengthened with:
 - execution traces or checker outputs summarized in a table,
 - latency measurements for the normalization and checking pipeline,
 - additional scenario families beyond live broadcasting,
-- and, ideally, a comparison against a schema-only baseline or an unchecked natural-language baseline.
+- and quantitative measurements of false accept or false reject differences between the schema baseline and the staged F* lane.
 
 ## 8. Discussion
 
@@ -324,9 +340,9 @@ For the submission version, we should position this paper specifically against:
 
 ## 11. Conclusion
 
-This paper argued that the admission boundary for network intents is a critical safety and reliability control point in autonomous networks. We presented a prototype TMF921 intent shell that accepts structured and natural-language requests, classifies and normalizes them into a canonical representation, emits auditable semantic artifacts, and checks admissibility using explicit provider constraints encoded in F*. The prototype shows how a practical telecom standards interface can be combined with machine-checked validity predicates to reject vague, over-demanding, or policy-violating requests before execution.
+This paper argued that the admission boundary for network intents is a critical safety and reliability control point in autonomous networks. We presented a prototype TMF921 intent shell that accepts structured and natural-language requests, classifies and normalizes them into a canonical representation, emits auditable semantic artifacts, and checks admissibility using explicit provider constraints encoded in F*. By comparing the same normalized object against a JSON Schema baseline and a staged witness chain, the prototype shows that many unsafe requests remain structurally valid JSON yet still fail to construct the domain-admissible artifacts needed for execution.
 
-The main lesson is simple: in agentic and AI-assisted network management, the safest place to be conservative is before orchestration begins. Standards-based intent ingestion, typed normalization, and formal admissibility checks provide a promising foundation for that conservatism.
+The main lesson is simple: in agentic and AI-assisted network management, the safest place to be conservative is before orchestration begins. Standards-based intent ingestion, typed normalization, and formal admissibility checks provide a promising foundation for that conservatism, especially when acceptance means more than "passed validation" and instead means "can construct the typed artifact required by the next step."
 
 ## Appendix A. Candidate Figures and Tables
 
@@ -346,25 +362,36 @@ End-to-end architecture:
 
 ### Figure 2
 
-Live-broadcast scenario timeline showing:
+Live-broadcast witness ladder showing:
 
 - original natural-language request,
-- normalized fields,
-- TM-level checks,
-- provider-level checks,
-- accept or reject outcome.
+- normalized JSON shape,
+- JSON baseline verdict,
+- TM and provider witness stages,
+- admission token when successful.
+
+### Figure 3
+
+Comparison matrix showing:
+
+- scenario,
+- JSON baseline verdict,
+- first failed witness,
+- selected provider profile,
+- and whether an admission token exists.
 
 ### Table 1
 
 Scenario summary table:
 
-| Scenario | TM-valid | Provider-valid | Primary rejection reason |
+| Scenario | JSON baseline | First failed witness | Provider-valid | Admission token |
 |---|---|---|---|
-| Broadcast success | Yes | Yes | N/A |
-| Capacity failure | Yes | No | Device count exceeds profile capacity |
-| Latency failure | Yes | No | Requested latency below provider bound |
-| Policy failure | Yes | No | Public-safety policy violation |
-| Vague request | No | N/A | Missing measurable target and expectations |
+| Broadcast success | Pass | N/A | Yes | Yes |
+| Window failure | Pass | `window_checked_intent` | N/A | No |
+| Capacity failure | Pass | `capacity_checked_intent` | No | No |
+| Latency failure | Pass | `latency_checked_intent` | No | No |
+| Policy failure | Pass | `policy_checked_intent` | No | No |
+| Vague request | Fail | `measurable_intent` | N/A | No |
 
 ### Table 2
 
@@ -374,7 +401,7 @@ Artifact traceability table:
 |---|---|
 | Canonical IR | Stable internal representation |
 | JSON-LD | Semantic interoperability |
-| Generated F* module | Machine-checkable encoding |
+| Generated F* module | Machine-checkable witness script |
 | Checker diagnostics | Explain rejections |
 | Hashes and paths | Audit and reproducibility |
 
@@ -385,5 +412,5 @@ Artifact traceability table:
 - Include code-to-paper mapping notes for reproducibility.
 - Add one or two additional scenario families beyond live broadcasting.
 - Measure processing overhead for normalization and checking.
-- Add a short comparison against a schema-only baseline.
+- Quantify where the schema baseline and the staged witness model diverge.
 - Convert to IEEE conference LaTeX template after content stabilizes.

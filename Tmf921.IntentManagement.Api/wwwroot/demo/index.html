@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TMF921 Demo Scenarios</title>
+  <title>TMF921 Dependent Validation Demo</title>
   <link rel="stylesheet" href="/demo/styles.css">
 </head>
 <body>
   <div class="page-shell">
     <header class="hero">
       <p class="eyebrow">TMF921 Intent Management Demo</p>
-      <h3>Choose a scenario, validate it, and inspect the generated F*</h3>
+      <h3>Compare schema validation with staged dependent-type admission</h3>
       <p class="hero-copy">
-        Pick one of the demo cases, adjust the natural-language statement if needed,
-        and send it to the backend for TM validation, provider checks, and F* generation.
+        Choose a scenario, run the backend, and inspect what plain JSON shape validation can prove
+        versus what the staged F* witness chain can prove about the business domain.
       </p>
       <div class="hero-status">
         <span class="status-dot" id="api-status-dot"></span>
@@ -49,30 +49,67 @@
 
         <section class="result-panel">
           <div class="summary-strip" id="summary-strip">Choose a scenario and run validation.</div>
+          <div class="story-strip" id="story-strip">The demo will explain why the selected case is more than schema validation.</div>
+
+          <div class="comparison-grid">
+            <article class="lane-card" id="json-card">
+              <p class="lane-label">Baseline</p>
+              <h3>JSON Validation</h3>
+              <div id="json-summary" class="lane-summary"></div>
+              <ul id="json-issues" class="issue-list compact"></ul>
+            </article>
+
+            <article class="lane-card" id="tm-card">
+              <p class="lane-label">Witness 1</p>
+              <h3>TM Witness</h3>
+              <div id="tm-summary" class="lane-summary"></div>
+              <ul id="tm-issues" class="issue-list compact"></ul>
+            </article>
+
+            <article class="lane-card" id="provider-card">
+              <p class="lane-label">Witness 2</p>
+              <h3>Provider Witness</h3>
+              <div id="provider-summary" class="lane-summary"></div>
+              <div id="provider-profile" class="lane-meta"></div>
+              <div id="provider-token" class="lane-meta"></div>
+              <ul id="provider-issues" class="issue-list compact"></ul>
+            </article>
+          </div>
+
           <div class="result-grid">
-            <div class="result-block">
-              <h3>TM Validation</h3>
-              <div id="tm-summary" class="tm-summary"></div>
-              <ul id="tm-issues" class="issue-list"></ul>
-            </div>
-            <div class="result-block">
-              <h3>Provider Validation</h3>
-              <div id="provider-summary" class="provider-summary"></div>
-              <ul id="provider-issues" class="issue-list"></ul>
-            </div>
-            <div class="result-block">
-              <h3>Generated TM F*</h3>
-              <pre id="generated-tm-fstar" class="code-frame"></pre>
-            </div>
-            <div class="result-block">
-              <h3>Generated Provider F*</h3>
-              <pre id="generated-provider-fstar" class="code-frame"></pre>
-            </div>
-            <div class="result-block">
+            <section class="result-block trace-block">
+              <h3>Constraint Ladder</h3>
+              <ol id="constraint-trace" class="constraint-trace"></ol>
+            </section>
+
+            <section class="result-block">
               <h3>Normalized Intent</h3>
               <pre id="normalized-json" class="code-frame"></pre>
-            </div>
+            </section>
           </div>
+
+          <details class="reference-panel">
+            <summary>Dependent-Type Audit</summary>
+            <div class="audit-grid">
+              <div class="result-block">
+                <h3>Generated Provider F*</h3>
+                <pre id="generated-provider-fstar" class="code-frame"></pre>
+              </div>
+              <div class="result-block">
+                <h3>Checker Excerpt</h3>
+                <pre id="provider-checker-output" class="code-frame"></pre>
+              </div>
+              <div class="result-block">
+                <h3>Shell Audit Summary</h3>
+                <pre id="audit-shell-meta" class="code-frame"></pre>
+              </div>
+              <div class="result-block">
+                <h3>Shell Audit F*</h3>
+                <pre id="audit-shell-fstar" class="code-frame"></pre>
+              </div>
+            </div>
+          </details>
+
           <details class="reference-panel">
             <summary>Reference demo F* case</summary>
             <pre id="reference-fstar" class="code-frame"></pre>

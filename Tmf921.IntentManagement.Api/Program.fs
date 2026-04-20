@@ -1,33 +1,94 @@
 namespace Tmf921.IntentManagement.Api
 open System
 open System.Text.Json
-open System.Text.Json.Serialization
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
+open Microsoft.Extensions.AI
+open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
+open OpenAI.Responses
 
 module Program =
     let exitCode = 0
 
+    let private tryParseInt (value: string) =
+        match Int32.TryParse value with
+        | true, parsed -> Some parsed
+        | _ -> None
+
+    let private tryParseFloat32 (value: string) =
+        match Single.TryParse value with
+        | true, parsed -> Some parsed
+        | _ -> None
+
+    let private resolveIntentLlmOptions (configuration: IConfiguration) =
+        let defaults = IntentLlmDefaults.value
+
+        { Model = configuration["IntentLlm:Model"] |> Option.ofObj |> Option.defaultValue defaults.Model
+          MaxAttempts =
+            configuration["IntentLlm:MaxAttempts"]
+            |> Option.ofObj
+            |> Option.bind tryParseInt
+            |> Option.defaultValue defaults.MaxAttempts
+          Temperature =
+            configuration["IntentLlm:Temperature"]
+            |> Option.ofObj
+            |> Option.bind tryParseFloat32
+            |> Option.defaultValue defaults.Temperature
+          TimeoutSeconds =
+            configuration["IntentLlm:TimeoutSeconds"]
+            |> Option.ofObj
+            |> Option.bind tryParseInt
+            |> Option.defaultValue defaults.TimeoutSeconds
+          UseScenarioFixtures =
+            configuration["IntentLlm:UseScenarioFixtures"]
+            |> Option.ofObj
+            |> Option.bind (fun value ->
+                match Boolean.TryParse value with
+                | true, parsed -> Some parsed
+                | _ -> None)
+            |> Option.defaultValue defaults.UseScenarioFixtures }
+
+    let private resolveOpenAiApiKey (configuration: IConfiguration) =
+        configuration["OPENAI_API_KEY"]
+        |> Option.ofObj
+        |> Option.defaultValue (Environment.GetEnvironmentVariable("OPENAI_API_KEY"))
+
+    let private createChatClient (model: string) (apiKey: string) =
+        ResponsesClient(model, apiKey).AsIChatClient()
+
     [<EntryPoint>]
     let main args =
+        let builder = WebApplication.CreateBuilder(args)
+        let intentLlmOptions = resolveIntentLlmOptions builder.Configuration
+        let openAiApiKey = resolveOpenAiApiKey builder.Configuration
+
         if args |> Array.exists (fun arg -> arg = "--run-demo-scenarios") then
-            let options = JsonSerializerOptions(WriteIndented = true)
-            options.DefaultIgnoreCondition <- JsonIgnoreCondition.WhenWritingNull
-            DemoScenarios.runAll()
+            let options = JsonSerializerOptions(serializerOptions)
+            options.WriteIndented <- true
+            let rawIntentGenerator =
+                RawIntentGenerator(createChatClient intentLlmOptions.Model openAiApiKey, intentLlmOptions)
+                :> IRawIntentGenerator
+
+            DemoScenarios.runAllAsync rawIntentGenerator
+            |> fun task -> task.GetAwaiter().GetResult()
             |> fun results -> JsonSerializer.Serialize(results, options)
             |> Console.WriteLine
             exitCode
         else
-            let builder = WebApplication.CreateBuilder(args)
-
             builder.Services
                 .AddControllers()
                 .AddJsonOptions(fun options ->
-                    options.JsonSerializerOptions.DefaultIgnoreCondition <- JsonIgnoreCondition.WhenWritingNull)
+                    configureSerializerOptions options.JsonSerializerOptions |> ignore)
             |> ignore
+            builder.Services.AddSingleton(intentLlmOptions) |> ignore
+            builder.Services
+                .AddChatClient(fun _ ->
+                    createChatClient intentLlmOptions.Model openAiApiKey)
+            |> ignore
+            builder.Services.AddSingleton<IRawIntentGenerator, RawIntentGenerator>() |> ignore
             builder.Services.AddSingleton<IIntentStore, IntentStore>() |> ignore
             builder.Services.AddSingleton<ShellStore>() |> ignore
             builder.Services.AddEndpointsApiExplorer() |> ignore

@@ -16,36 +16,34 @@ type IntentStore() =
     let merge (existing: IntentResource) (patch: IntentMvo) =
         let nextExpression =
             patch.Expression
+            |> Domain.tryGetSkippableValue
             |> Option.map Domain.normalizeExpression
             |> Option.defaultValue existing.Expression
 
-        let nextIsBundle =
-            match patch.IsBundle with
-            | Some value -> Some value
-            | None -> existing.IsBundle
+        let nextIsBundle = Domain.applySkippableOption existing.IsBundle patch.IsBundle
 
         let nextLifecycleStatus =
-            patch.LifecycleStatus |> Option.defaultValue existing.LifecycleStatus
+            Domain.applySkippableValue existing.LifecycleStatus patch.LifecycleStatus
 
         let nextStatusChangeDate =
             if nextLifecycleStatus <> existing.LifecycleStatus then Some DateTimeOffset.UtcNow
             else existing.StatusChangeDate
 
         { existing with
-            Name = patch.Name |> Option.defaultValue existing.Name
+            Name = Domain.applySkippableValue existing.Name patch.Name
             Expression = nextExpression
-            Description = patch.Description |> Option.orElse existing.Description
-            ValidFor = patch.ValidFor |> Option.orElse existing.ValidFor
+            Description = Domain.applySkippableOption existing.Description patch.Description
+            ValidFor = Domain.applySkippableOption existing.ValidFor patch.ValidFor
             IsBundle = nextIsBundle
-            Priority = patch.Priority |> Option.orElse existing.Priority
+            Priority = Domain.applySkippableOption existing.Priority patch.Priority
             StatusChangeDate = nextStatusChangeDate
-            Context = patch.Context |> Option.orElse existing.Context
-            Version = patch.Version |> Option.orElse existing.Version
-            IntentSpecification = patch.IntentSpecification |> Option.orElse existing.IntentSpecification
+            Context = Domain.applySkippableOption existing.Context patch.Context
+            Version = Domain.applySkippableOption existing.Version patch.Version
+            IntentSpecification = Domain.applySkippableOption existing.IntentSpecification patch.IntentSpecification
             LifecycleStatus = nextLifecycleStatus
-            Type = patch.Type |> Option.defaultValue existing.Type
-            BaseType = patch.BaseType |> Option.orElse existing.BaseType
-            SchemaLocation = patch.SchemaLocation |> Option.orElse existing.SchemaLocation
+            Type = Domain.applySkippableValue existing.Type patch.Type
+            BaseType = Domain.applySkippableOption existing.BaseType patch.BaseType
+            SchemaLocation = Domain.applySkippableOption existing.SchemaLocation patch.SchemaLocation
             LastUpdate = DateTimeOffset.UtcNow }
 
     interface IIntentStore with
