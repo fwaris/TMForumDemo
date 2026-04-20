@@ -1,4 +1,4 @@
-# Toward Safe Natural-Language Intent Admission for Autonomous Networks: A TMF921-to-F* Shell for Verified Provider Constraints
+# Dependently Typed Validation of Natural-Language Intents for Autonomous Networks
 
 **Authors:** Faisal Waris et al.  
 **Target venue:** IEEE ICNP 2026  
@@ -6,11 +6,20 @@
 
 ## Abstract
 
-Autonomous and AI-assisted networks increasingly expose intent interfaces to operations teams, service orchestrators, and potentially software agents. This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they are also ambiguous, under-specified, and difficult to validate against provider-specific operational constraints. If such intents are admitted too early into orchestration pipelines, downstream automation can violate policy, over-request resources, or issue unsafe actions.
+Natural language (NL) intents will be increasingly the control mechanism of 5G/6G autonomous telecom networks. 
 
-This paper presents a prototype intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API. The shell accepts structured and natural-language intent expressions, classifies the input, normalizes admissible requests into a canonical intermediate representation and JSON-LD form, and compares two validation lanes over the same normalized object: a JSON Schema baseline that checks shape and local scalar constraints, and an F* lane that checks whether successive telecom-management and provider-specific witnesses can actually be constructed. Our design separates two safety gates: a telecom-management gate that checks whether a request is sufficiently specific to qualify as a valid intent, and a provider-admission gate that checks whether the resulting request satisfies venue-, profile-, and policy-specific constraints. We instantiate the approach on a live-broadcast connectivity scenario and show how success and failure cases can be captured as explicit proof obligations, including reversed time windows, capacity violations, unrealistic latency requests, and protected-traffic policy violations.
+Example: "Provide an ultra-reliable low-latency 5G service for telemedicine and critical care operations at Mayo Clinic on an ongoing basis. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms ...".
 
-The prototype demonstrates a practical middle ground between free-form LLM-driven intent capture and brittle schema-only validation. Rather than directly trusting generated actions, the shell narrows natural-language requests into a typed intent model, preserves sidecar evidence for auditability, and rejects under-specified or unsafe requests before provider execution. The key distinction is not merely that F* also validates the request, but that F* can either construct or fail to construct domain-admissible artifacts, culminating in a typed admission token that downstream steps can require. We argue that this architecture is a useful safety pattern for intent-driven autonomous networks and a promising bridge between standards-based intent APIs and formally checked admission control.
+This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they can be ambiguous, under-specified, and may not validate against additional provider-specific operational constraints. 
+
+This paper presents a prototype, high-assurance, intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API. TM921 serves as 'front door' for NL intents and as such imposes the minimal semantic requirements via the TR292 OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by TR292.
+
+This paper shows how NL intents may be trusted -- with almost provably-correct levels of assurance -- using formal verification systems rooted in dependently-typed languages. First (offline) the TR292 ontology is converted to the equivalent dependent types of the F* language. These serve as propositions against which incoming intents may be checked. Then (online) received natural-language intents are translated by a Large Language Model (LLM) to F* code that is validated (type-checked) against the TR292 dependent types, by the F* proof checker. Only validated intents are admitted.
+
+Further, since TMF921 structure-imposition is necessarily generic, we demo provider-specific intent validation as further refinements of the TR292 types. 
+
+It is observed that valid intents are translated and validated with high reliability. Specifically, the LLM (GPT-5.4) produces correct F* code in approximately 99% of cases on the first attempt, and achieves 100% correctness with a single retry. These results suggest that the apparent non-determinism of natural language and LLM-generated outputs can be effectively mitigated through dependent-type–based validation.
+
 
 ## 1. Introduction
 
