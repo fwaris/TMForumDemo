@@ -1,0 +1,46 @@
+module CriticalServiceDemo.ProfileStandard
+
+open ProviderIntentAdmission
+open TmForumTr292CommonCore
+
+let candidate_intent : raw_tm_intent =
+  { intent_name = "CriticalServiceIntent";
+    scenario_family = CriticalServiceFamily;
+    target_name = Some "City General Hospital";
+    target_kind = Some FacilityTarget;
+    service_class = Some "ultra-reliable-5g-clinical";
+    event_month = Some "April";
+    event_day = Some 25;
+    event_year = Some 2026;
+    start_hour = Some 8;
+    end_hour = Some 20;
+    timezone = Some "America/Detroit";
+    primary_device_count = Some 55;
+    auxiliary_endpoint_count = Some 110;
+    max_latency_ms = Some 12;
+    reporting_interval_minutes = Some 10;
+    immediate_degradation_alerts = true;
+    safety_policy_declared = true;
+    preserve_emergency_traffic = true;
+    request_public_safety_preemption = false }
+
+let measurable_witness : measurable_intent candidate_intent =
+  mk_measurable candidate_intent
+
+let quantity_witness : quantity_checked_intent candidate_intent =
+  mk_quantity_checked candidate_intent
+
+let window_witness : window_checked_intent candidate_intent =
+  mk_window_checked candidate_intent
+
+let selected_profile : profile =
+  resolve_profile candidate_intent
+
+let profiled_witness : profiled_intent selected_profile candidate_intent =
+  mk_profiled selected_profile candidate_intent
+
+let capacity_witness : capacity_checked_intent selected_profile candidate_intent =
+  mk_capacity_checked selected_profile candidate_intent
+
+let latency_witness : latency_checked_intent selected_profile candidate_intent =
+  mk_latency_checked selected_profile candidate_intent

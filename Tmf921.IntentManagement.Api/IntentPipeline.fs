@@ -1,7 +1,6 @@
 namespace Tmf921.IntentManagement.Api
 
 open System
-open System.Diagnostics
 open System.IO
 open System.Security.Cryptography
 open System.Text
@@ -15,27 +14,17 @@ module IntentPipeline =
         { NormalizedExpression: IntentExpression
           ProcessingRecord: IntentProcessingRecord }
 
-    type private SidecarCheckResult =
-        { Success: bool
-          CheckerVersion: string option
-          GeneratedModule: string
-          Stdout: string
-          Stderr: string
-          Diagnostics: ProcessingDiagnostic list }
+    type private CheckerRepairState =
+        { Generator: IRawIntentGenerator
+          GenerationContext: RawIntentGenerationContext
+          RetryCount: int }
 
-    let private canonicalContext =
-        {| icm = "http://www.models.tmforum.org/tio/v1.0.0/IntentCommonModel#"
-           tio = "http://www.models.tmforum.org/tio/v1.0.0#"
-           quan = "http://www.models.tmforum.org/tio/v1.0.0/QuantityOntology#"
-           funn = "http://www.models.tmforum.org/tio/v1.0.0/FunctionOntology#" |}
+    let private checkerRepairRetryLimit = 1
 
     let private writeIndented path value =
         let options = JsonSerializerOptions(serializerOptions)
         options.WriteIndented <- true
         File.WriteAllText(path, JsonSerializer.Serialize(value, options))
-
-    let private serializeElement value =
-        JsonSerializer.SerializeToElement(value, serializerOptions)
 
     let private sha256 path =
         use stream = File.OpenRead(path)
@@ -46,7 +35,7 @@ module IntentPipeline =
 
     let private toArtifactReference path =
         if File.Exists(path) then
-            Some { Path = path; Sha256 = Some (sha256 path) }
+            Some { Path = path; Sha256 = Some(sha256 path) }
         else
             None
 
@@ -61,10 +50,10 @@ module IntentPipeline =
         | :? JsonValue as value ->
             try
                 let text = value.GetValue<string>()
-                if String.IsNullOrWhiteSpace text then Some (node.ToJsonString()) else Some text
+                if String.IsNullOrWhiteSpace text then Some(node.ToJsonString()) else Some text
             with _ ->
-                Some (node.ToJsonString())
-        | _ -> Some (node.ToJsonString())
+                Some(node.ToJsonString())
+        | _ -> Some(node.ToJsonString())
 
     let private tryGetPropertyString (obj: JsonObject) (names: string list) =
         names
@@ -83,8 +72,7 @@ module IntentPipeline =
         | :? JsonObject as obj ->
             [ tryGetPropertyString obj [ "@id"; "id"; "name"; "value"; "iri"; "target" ] ]
             |> List.choose id
-        | _ ->
-            stringOrJson node |> Option.toList
+        | _ -> stringOrJson node |> Option.toList
 
     let private classifyObject (obj: JsonObject) =
         if obj.ContainsKey("@context") || obj.ContainsKey("@type") then
@@ -110,8 +98,7 @@ module IntentPipeline =
         | JsonValueKind.String ->
             let text = expression.ExpressionValue.GetString()
             if String.IsNullOrWhiteSpace text then InputKind.Ambiguous else InputKind.NaturalLanguage
-        | JsonValueKind.Object ->
-            ensureObject expression.ExpressionValue |> classifyObject
+        | JsonValueKind.Object -> ensureObject expression.ExpressionValue |> classifyObject
         | JsonValueKind.Array -> InputKind.StructuredNormalizable
         | JsonValueKind.Undefined
         | JsonValueKind.Null -> InputKind.Ambiguous
@@ -137,6 +124,12 @@ module IntentPipeline =
           Condition = condition
           Quantity = quantity
           FunctionApplication = None }
+
+    let private inferProfile (request: IntentFvo) : OntologyProfile =
+        match request.IntentSpecification with
+        | Some spec when not (String.IsNullOrWhiteSpace(spec.Name |> Option.defaultValue "")) ->
+            { Domain.defaultOntologyProfile with Name = spec.Name.Value }
+        | _ -> { Domain.defaultOntologyProfile with Name = "tmforum.tr292-common-core" }
 
     let private buildStructuredTargets (request: IntentFvo) (payload: JsonObject) : CanonicalTarget list =
         let candidates =
@@ -174,12 +167,6 @@ module IntentPipeline =
         | xs ->
             xs |> List.map (fun item -> mkExpectation "PropertyExpectation" item (Some item) None None)
 
-    let private inferProfile (request: IntentFvo) : OntologyProfile =
-        match request.IntentSpecification with
-        | Some spec when not (String.IsNullOrWhiteSpace (spec.Name |> Option.defaultValue "")) ->
-            { Domain.defaultOntologyProfile with Name = spec.Name.Value }
-        | _ -> Domain.defaultOntologyProfile
-
     let normalizeStructured (request: IntentFvo) (classification: InputKind) : CanonicalIntentIr =
         let payload =
             match request.Expression.ExpressionValue.ValueKind with
@@ -205,371 +192,32 @@ module IntentPipeline =
           SourceIri = Some request.Expression.Iri
           RawExpressionType = request.Expression.Type }
 
-    let emitJsonLd (canonical: CanonicalIntentIr) =
-        let expectationNodes =
-            canonical.Expectations
-            |> List.map (fun expectation ->
-                let obj = JsonObject()
-                obj["@type"] <- JsonValue.Create($"icm:{expectation.Kind}")
-                obj["icm:subject"] <- JsonValue.Create(expectation.Subject)
-                expectation.Description |> Option.iter (fun value -> obj["icm:description"] <- JsonValue.Create(value))
-
-                expectation.Quantity
-                |> Option.iter (fun quantity ->
-                    let q = JsonObject()
-                    q["@type"] <- JsonValue.Create("quan:Quantity")
-                    q["rdf:value"] <- JsonValue.Create(quantity.Value)
-                    quantity.Unit |> Option.iter (fun unitName -> q["quan:unit"] <- JsonValue.Create(unitName))
-                    obj["icm:quantity"] <- q)
-
-                expectation.Condition
-                |> Option.iter (fun condition ->
-                    let rec toNode (value: CanonicalCondition) =
-                        let conditionObject = JsonObject()
-                        conditionObject["tio:kind"] <- JsonValue.Create(value.Kind)
-                        value.Subject |> Option.iter (fun text -> conditionObject["tio:subject"] <- JsonValue.Create(text))
-                        value.Operator |> Option.iter (fun text -> conditionObject["tio:operator"] <- JsonValue.Create(text))
-                        value.Value |> Option.iter (fun text -> conditionObject["tio:value"] <- JsonValue.Create(text))
-
-                        if not value.Children.IsEmpty then
-                            let children = JsonArray()
-                            value.Children |> List.iter (toNode >> children.Add)
-                            conditionObject["tio:children"] <- children
-
-                        conditionObject :> JsonNode
-
-                    obj["icm:condition"] <- toNode condition)
-
-                obj :> JsonNode)
-
-        let targetNodes =
-            canonical.Targets
-            |> List.map (fun target ->
-                let obj = JsonObject()
-                obj["@id"] <- JsonValue.Create(target.Id)
-                target.TargetType |> Option.iter (fun targetType -> obj["@type"] <- JsonValue.Create(targetType))
-                target.Name |> Option.iter (fun name -> obj["icm:name"] <- JsonValue.Create(name))
-                obj :> JsonNode)
-
-        let generatedIntentId =
-            canonical.IntentName.ToLowerInvariant().Replace(" ", "-")
-
-        let intentId =
-            canonical.SourceIri |> Option.defaultValue $"urn:tmf921:intent:{generatedIntentId}"
-
-        let intent = JsonObject()
-        intent["@id"] <- JsonValue.Create(intentId)
-        intent["@type"] <- JsonValue.Create("icm:Intent")
-        intent["icm:name"] <- JsonValue.Create(canonical.IntentName)
-        canonical.Description |> Option.iter (fun value -> intent["icm:description"] <- JsonValue.Create(value))
-        canonical.Context |> Option.iter (fun value -> intent["icm:context"] <- JsonValue.Create(value))
-        canonical.Priority |> Option.iter (fun value -> intent["icm:priority"] <- JsonValue.Create(value))
-        intent["icm:target"] <- JsonArray(targetNodes |> List.toArray)
-        intent["icm:expectation"] <- JsonArray(expectationNodes |> List.toArray)
-        intent["tmf:profileName"] <- JsonValue.Create(canonical.Profile.Name)
-        intent["tmf:profileVersion"] <- JsonValue.Create(canonical.Profile.Version)
-
-        let root = JsonObject()
-        root["@context"] <- serializeElement canonicalContext |> cloneNode
-        root["@graph"] <- JsonArray([| intent :> JsonNode |])
-        JsonDocument.Parse(root.ToJsonString()).RootElement.Clone()
-
-    let private assembleRawIntent (request: IntentFvo) (text: string) (envelope: RawIntentParseEnvelope) =
-        let toCanonicalTarget (value: RawIntentTarget) : CanonicalTarget =
-            { Id = value.Id |> Option.defaultValue ""
-              TargetType = value.TargetType
-              Name = value.Name }
-
-        let toCanonicalConditionClause (value: RawIntentConditionClause) : CanonicalCondition =
-            { Kind = value.Kind |> Option.defaultValue ""
-              Subject = value.Subject
-              Operator = value.Operator
-              Value = value.Value
-              Children = [] }
-
-        let toCanonicalCondition (value: RawIntentCondition) : CanonicalCondition =
-            { Kind = value.Kind |> Option.defaultValue ""
-              Subject = value.Subject
-              Operator = value.Operator
-              Value = value.Value
-              Children = value.Children |> List.map toCanonicalConditionClause }
-
-        let toCanonicalQuantity (value: RawIntentQuantity) : CanonicalQuantity =
-            { Value = value.Value |> Option.defaultValue ""
-              Unit = value.Unit }
-
-        let toCanonicalFunctionApplication (value: RawIntentFunctionApplication) : CanonicalFunctionApplication =
-            { Name = value.Name |> Option.defaultValue ""
-              Arguments = value.Arguments }
-
-        let toCanonicalExpectation (value: RawIntentExpectation) : CanonicalExpectation =
-            { Kind = value.Kind |> Option.defaultValue ""
-              Subject = value.Subject |> Option.defaultValue ""
-              Description = value.Description
-              Condition = value.Condition |> Option.map toCanonicalCondition
-              Quantity = value.Quantity |> Option.map toCanonicalQuantity
-              FunctionApplication = value.FunctionApplication |> Option.map toCanonicalFunctionApplication }
-
-        match envelope.SemanticCore with
-        | None ->
-            Error
-                [ diagnostics
-                    "SCHEMA_MISMATCH"
-                    "The parsed natural-language result did not contain semanticCore content."
-                    None ]
-        | Some semanticCore ->
-            Ok
-                { IntentName = semanticCore.IntentName |> Option.defaultValue request.Name
-                  Description = semanticCore.Description |> Option.orElse request.Description
-                  Targets = semanticCore.Targets |> List.map toCanonicalTarget
-                  Expectations = semanticCore.Expectations |> List.map toCanonicalExpectation
-                  Context = semanticCore.Context
-                  Priority = semanticCore.Priority
-                  Profile = inferProfile request
-                  SourceClassification = InputKind.NaturalLanguage
-                  SourceText = Some text
-                  SourceIri = Some request.Expression.Iri
-                  RawExpressionType = request.Expression.Type }
-
-    let private validateOntologyRawIntent (canonical: CanonicalIntentIr) =
-        JsonSerializer.SerializeToElement(canonical, serializerOptions)
-        |> RawIntentContracts.validateOntologyRawIntent
-
-    let private fstarString (value: string) =
-        value
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\r", "")
-            .Replace("\n", "\\n")
-
-    let private renderOptionString (value: string option) =
-        match value with
-        | Some text -> $"Some \"{fstarString text}\""
-        | None -> "None"
-
-    let private renderStringList (values: string list) =
-        values
-        |> List.map (fun item -> $"\"{fstarString item}\"")
-        |> String.concat "; "
-        |> sprintf "[%s]"
-
-    let private renderTargetDeclaration (index: int) (value: CanonicalTarget) =
-        let name = $"target_{index}"
-        let declaration =
-            $"""let {name} : target_ref =
-  {{ id = "{fstarString value.Id}";
-     target_type = {renderOptionString value.TargetType};
-     name = {renderOptionString value.Name} }}"""
-
-        declaration, name
-
-    let rec private renderConditionDeclaration (name: string) (value: CanonicalCondition) =
-        let childDeclarations, childNames =
-            value.Children
-            |> List.mapi (fun index child -> renderConditionDeclaration $"{name}_child_{index}" child)
-            |> List.unzip
-
-        let childrenBlock =
-            childDeclarations |> String.concat "\n\n"
-
-        let childRefs = childNames |> String.concat "; "
-
-        let current =
-            $"""let {name} : condition =
-  {{ kind = "{fstarString value.Kind}";
-     subject = {renderOptionString value.Subject};
-     operator = {renderOptionString value.Operator};
-     value = {renderOptionString value.Value};
-     children = [{childRefs}] }}"""
-
-        let declaration =
-            if String.IsNullOrWhiteSpace childrenBlock then current else $"{childrenBlock}\n\n{current}"
-
-        declaration, name
-
-    let private renderQuantityDeclaration (name: string) (value: CanonicalQuantity) =
-        let declaration =
-            $"""let {name} : quantity =
-  {{ value = "{fstarString value.Value}";
-     unit = {renderOptionString value.Unit} }}"""
-
-        declaration, name
-
-    let private renderFunctionDeclaration (name: string) (value: CanonicalFunctionApplication) =
-        let arguments =
-            value.Arguments
-            |> List.map (fun item -> $"\"{fstarString item}\"")
-            |> String.concat "; "
-
-        let declaration =
-            $"""let {name} : function_application =
-  {{ name = "{fstarString value.Name}";
-     arguments = [{arguments}] }}"""
-
-        declaration, name
-
-    let private renderExpectationDeclaration (index: int) (value: CanonicalExpectation) =
-        let conditionDeclarations, conditionRef =
-            match value.Condition with
-            | Some condition ->
-                let declaration, name = renderConditionDeclaration $"condition_{index}" condition
-                declaration, $"Some {name}"
-            | None -> "", "None"
-
-        let quantityDeclarations, quantityRef =
-            match value.Quantity with
-            | Some quantity ->
-                let declaration, name = renderQuantityDeclaration $"quantity_{index}" quantity
-                declaration, $"Some {name}"
-            | None -> "", "None"
-
-        let functionDeclarations, functionRef =
-            match value.FunctionApplication with
-            | Some application ->
-                let declaration, name = renderFunctionDeclaration $"function_{index}" application
-                declaration, $"Some {name}"
-            | None -> "", "None"
-
-        let prefix =
-            [ conditionDeclarations; quantityDeclarations; functionDeclarations ]
-            |> List.filter (String.IsNullOrWhiteSpace >> not)
-            |> String.concat "\n\n"
-
-        let name = $"expectation_{index}"
-
-        let current =
-            $"""let {name} : expectation =
-  {{ kind = "{fstarString value.Kind}";
-     subject = "{fstarString value.Subject}";
-     description = {renderOptionString value.Description};
-     condition = {conditionRef};
-     quantity = {quantityRef};
-     function_application = {functionRef} }}"""
-
-        let declaration =
-            if String.IsNullOrWhiteSpace prefix then current else $"{prefix}\n\n{current}"
-
-        declaration, name
-
-    let private ontologyLibraryDir () =
-        Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "FStar")
-
     let private artifactRoot () =
         Path.Combine(AppContext.BaseDirectory, "tmf921-artifacts", "intent-pipeline")
 
-    let private buildGeneratedModule (moduleName: string) (canonical: CanonicalIntentIr) =
-        let targetDeclarations, targetRefs =
-            canonical.Targets
-            |> List.mapi renderTargetDeclaration
-            |> List.unzip
-
-        let expectationDeclarations, expectationRefs =
-            canonical.Expectations
-            |> List.mapi renderExpectationDeclaration
-            |> List.unzip
-
-        let targetBlock = targetDeclarations |> String.concat "\n\n"
-        let expectationBlock = expectationDeclarations |> String.concat "\n\n"
-        let targetRefs = targetRefs |> String.concat "; "
-        let expectationRefs = expectationRefs |> String.concat "; "
-
-        $"""module {moduleName}
-
-open IntentOntology
-
-let ontology_profile : ontology_profile =
-  {{ name = "{fstarString canonical.Profile.Name}";
-     version = "{fstarString canonical.Profile.Version}";
-     enabled_modules = {renderStringList canonical.Profile.EnabledModules} }}
-
-{targetBlock}
-
-{expectationBlock}
-
-let raw_intent_ir : raw_intent_ir =
-  {{ intent_name = "{fstarString canonical.IntentName}";
-     description = {renderOptionString canonical.Description};
-     targets = [{targetRefs}];
-     expectations = [{expectationRefs}];
-     context = {renderOptionString canonical.Context};
-     priority = {renderOptionString canonical.Priority};
-     profile_name = "{fstarString canonical.Profile.Name}";
-     profile_version = "{fstarString canonical.Profile.Version}";
-     enabled_modules = {renderStringList canonical.Profile.EnabledModules};
-     source_classification = "{canonical.SourceClassification}";
-     source_text = {renderOptionString canonical.SourceText};
-     source_iri = {renderOptionString canonical.SourceIri};
-     raw_expression_type = {renderOptionString canonical.RawExpressionType} }}
-
-let normalized_intent : canonical_intent_ir =
-  raw_intent_ir
-
-let source_metadata : source_metadata =
-  {{ classification = "{canonical.SourceClassification}";
-     source_text = {renderOptionString canonical.SourceText};
-     source_iri = {renderOptionString canonical.SourceIri} }}
-
-let checked_intent : checked_intent ontology_profile raw_intent_ir =
-  mk_checked_intent ontology_profile raw_intent_ir
-"""
-
-    let private runProcess (fileName: string) (arguments: string) =
-        let startInfo = ProcessStartInfo()
-        startInfo.FileName <- fileName
-        startInfo.Arguments <- arguments
-        startInfo.RedirectStandardOutput <- true
-        startInfo.RedirectStandardError <- true
-        startInfo.UseShellExecute <- false
-
-        use proc = new Process()
-        proc.StartInfo <- startInfo
-        proc.Start() |> ignore
-        let stdout = proc.StandardOutput.ReadToEnd()
-        let stderr = proc.StandardError.ReadToEnd()
-        proc.WaitForExit()
-        proc.ExitCode, stdout, stderr
-
-    let private checkerVersion () =
-        let exitCode, stdout, stderr = runProcess "fstar.exe" "--version"
-        if exitCode = 0 then
-            Some (stdout.Trim())
-        else if not (String.IsNullOrWhiteSpace stderr) then
-            Some (stderr.Trim())
-        else
-            None
-
-    let private runFStarCheck (generatedPath: string) (canonical: CanonicalIntentIr) =
-        let moduleName = Path.GetFileNameWithoutExtension(generatedPath : string)
-        let generatedModule = buildGeneratedModule moduleName canonical
-        File.WriteAllText(generatedPath, generatedModule, Encoding.UTF8)
-
-        let includeDir = ontologyLibraryDir ()
-        let arguments = $"--include \"{includeDir}\" \"{generatedPath}\""
-        let exitCode, stdout, stderr = runProcess "fstar.exe" arguments
-
-        let diagnostics =
-            if exitCode = 0 then
-                []
-            else
-                [ diagnostics "ONTOLOGY_CHECK_FAILED" "The generated F* module did not type-check." (Some stderr) ]
-
-        { Success = (exitCode = 0)
-          CheckerVersion = checkerVersion ()
-          GeneratedModule = generatedModule
-          Stdout = stdout
-          Stderr = stderr
-          Diagnostics = diagnostics }
+    let private writeCheckReport path requestId witnessName (result: IntentAdmission.WitnessCheckResult) =
+        writeIndented
+            path
+            {| requestId = requestId
+               witness = witnessName
+               success = result.Success
+               checkerVersion = result.CheckerVersion
+               stdout = result.Stdout
+               stderr = result.Stderr
+               diagnostics = result.Diagnostics |}
 
     let private writeRequestArtifacts
         (requestId: string)
         (rawText: string option)
         (llmPrompt: string option)
         (llmResponse: string option)
-        (semanticCore: RawIntentSemanticCore option)
-        (ontologyRawIntent: CanonicalIntentIr option)
+        (operationalIntent: OperationalIntentRecord option)
+        (canonicalIntent: CanonicalIntentIr option)
         (ontologyValidationReport: JsonElement option)
         (normalizedJsonLd: JsonElement option)
-        (sidecar: SidecarCheckResult option) =
+        (candidateCheck: IntentAdmission.WitnessCheckResult option)
+        (tmWitness: IntentAdmission.WitnessCheckResult option)
+        (providerWitness: IntentAdmission.WitnessCheckResult option) =
         let directory = Path.Combine(artifactRoot (), requestId)
         Directory.CreateDirectory(directory) |> ignore
 
@@ -577,65 +225,75 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
         let rawIntentPath = Path.Combine(directory, "raw-intent.txt")
         let llmPromptPath = Path.Combine(directory, "llm-prompt.txt")
         let llmResponsePath = Path.Combine(directory, "llm-response.json")
-        let semanticCorePath = Path.Combine(directory, "semantic-core.json")
+        let operationalIntentPath = Path.Combine(directory, "operational-intent.json")
         let ontologyRawIntentPath = Path.Combine(directory, "ontology-raw-intent.json")
         let ontologyValidationReportPath = Path.Combine(directory, "ontology-validation-report.json")
         let canonicalIrPath = Path.Combine(directory, "canonical-ir.json")
-        let generatedIntentPath = Path.Combine(directory, "generated-intent.fst")
-        let checkResultPath = Path.Combine(directory, "check-result.json")
         let normalizedIntentPath = Path.Combine(directory, "normalized-intent.jsonld")
+        let candidateModulePath = Path.Combine(directory, "candidate-intent.fst")
+        let candidateCheckPath = Path.Combine(directory, "candidate-intent-check.json")
+        let tmWitnessModulePath = Path.Combine(directory, "tm-witness.fst")
+        let tmWitnessCheckPath = Path.Combine(directory, "tm-witness-check.json")
+        let providerWitnessModulePath = Path.Combine(directory, "provider-witness.fst")
+        let providerWitnessCheckPath = Path.Combine(directory, "provider-witness-check.json")
         let checkedIntentPath = Path.Combine(directory, "checked-intent.fst")
 
         writeIndented requestPath {| requestId = requestId; generatedAt = DateTimeOffset.UtcNow |}
-        rawText |> Option.iter (fun text -> File.WriteAllText(rawIntentPath, text, Encoding.UTF8))
-        llmPrompt |> Option.iter (fun text -> File.WriteAllText(llmPromptPath, text, Encoding.UTF8))
-        llmResponse |> Option.iter (fun text -> File.WriteAllText(llmResponsePath, text, Encoding.UTF8))
-        semanticCore |> Option.iter (writeIndented semanticCorePath)
+        rawText |> Option.iter (fun (text: string) -> File.WriteAllText(rawIntentPath, text, Encoding.UTF8))
+        llmPrompt |> Option.iter (fun (text: string) -> File.WriteAllText(llmPromptPath, text, Encoding.UTF8))
+        llmResponse |> Option.iter (fun (text: string) -> File.WriteAllText(llmResponsePath, text, Encoding.UTF8))
+        operationalIntent |> Option.iter (writeIndented operationalIntentPath)
 
-        ontologyRawIntent
+        canonicalIntent
         |> Option.iter (fun canonical ->
             writeIndented ontologyRawIntentPath canonical
             writeIndented canonicalIrPath canonical)
 
         ontologyValidationReport
-        |> Option.iter (fun report -> File.WriteAllText(ontologyValidationReportPath, report.GetRawText(), Encoding.UTF8))
+        |> Option.iter (fun (report: JsonElement) -> File.WriteAllText(ontologyValidationReportPath, report.GetRawText(), Encoding.UTF8))
 
         normalizedJsonLd
-        |> Option.iter (fun normalized -> File.WriteAllText(normalizedIntentPath, normalized.GetRawText(), Encoding.UTF8))
+        |> Option.iter (fun (normalized: JsonElement) -> File.WriteAllText(normalizedIntentPath, normalized.GetRawText(), Encoding.UTF8))
 
-        sidecar
-        |> Option.iter (fun result ->
-            if not (String.IsNullOrWhiteSpace result.GeneratedModule) then
-                File.WriteAllText(generatedIntentPath, result.GeneratedModule, Encoding.UTF8)
+        candidateCheck
+        |> Option.iter (fun (result: IntentAdmission.WitnessCheckResult) ->
+            File.WriteAllText(candidateModulePath, result.ModuleText, Encoding.UTF8)
+            writeCheckReport candidateCheckPath requestId "candidate_module" result)
 
-            if result.Success && File.Exists(generatedIntentPath) then
-                File.Copy(generatedIntentPath, checkedIntentPath, true)
+        tmWitness
+        |> Option.iter (fun (result: IntentAdmission.WitnessCheckResult) ->
+            File.WriteAllText(tmWitnessModulePath, result.ModuleText, Encoding.UTF8)
+            writeCheckReport tmWitnessCheckPath requestId "tm_witness" result)
 
-            writeIndented
-                checkResultPath
-                {| requestId = requestId
-                   success = result.Success
-                   checkerVersion = result.CheckerVersion
-                   stdout = result.Stdout
-                   stderr = result.Stderr
-                   diagnostics = result.Diagnostics
-                   topLevelSymbols =
-                       [ "ontology_profile"
-                         "raw_intent_ir"
-                         "normalized_intent"
-                         "source_metadata"
-                         "checked_intent" ] |})
+        providerWitness
+        |> Option.iter (fun (result: IntentAdmission.WitnessCheckResult) ->
+            File.WriteAllText(providerWitnessModulePath, result.ModuleText, Encoding.UTF8)
+            writeCheckReport providerWitnessCheckPath requestId "provider_witness" result)
+
+        match providerWitness with
+        | Some result when result.Success -> File.WriteAllText(checkedIntentPath, result.ModuleText, Encoding.UTF8)
+        | _ ->
+            match tmWitness with
+            | Some result when result.Success -> File.WriteAllText(checkedIntentPath, result.ModuleText, Encoding.UTF8)
+            | _ -> ()
 
         { Request = toArtifactReference requestPath
           RawIntent = toArtifactReference rawIntentPath
           LlmPrompt = toArtifactReference llmPromptPath
           LlmResponse = toArtifactReference llmResponsePath
-          SemanticCore = toArtifactReference semanticCorePath
+          OperationalIntent = toArtifactReference operationalIntentPath
+          SemanticCore = toArtifactReference operationalIntentPath
           OntologyRawIntent = toArtifactReference ontologyRawIntentPath
           OntologyValidationReport = toArtifactReference ontologyValidationReportPath
+          CandidateIntentModule = toArtifactReference candidateModulePath
+          CandidateIntentCheck = toArtifactReference candidateCheckPath
+          TmWitnessModule = toArtifactReference tmWitnessModulePath
+          TmWitnessCheck = toArtifactReference tmWitnessCheckPath
+          ProviderWitnessModule = toArtifactReference providerWitnessModulePath
+          ProviderWitnessCheck = toArtifactReference providerWitnessCheckPath
           CanonicalIr = toArtifactReference canonicalIrPath
-          GeneratedIntent = toArtifactReference generatedIntentPath
-          CheckResult = toArtifactReference checkResultPath
+          GeneratedIntent = toArtifactReference candidateModulePath
+          CheckResult = toArtifactReference providerWitnessCheckPath |> Option.orElse (toArtifactReference tmWitnessCheckPath)
           NormalizedIntent = toArtifactReference normalizedIntentPath
           CheckedIntent = toArtifactReference checkedIntentPath }
 
@@ -643,6 +301,341 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
         { request.Expression with
             ExpressionValue = normalizedJsonLd
             Type = Some "JsonLdExpression" }
+
+    let private buildRecord
+        now
+        intentId
+        requestId
+        classification
+        profile
+        operationalIntent
+        canonicalIntent
+        normalizedJsonLd
+        checkedModule
+        tmWitnessStatus
+        providerWitnessStatus
+        selectedProfile
+        firstFailedWitness
+        admissionOutcome
+        llmParse
+        artifacts
+        diagnostics
+        checkerVersion =
+        { IntentId = intentId
+          RequestId = requestId
+          Classification = classification
+          Status =
+            match admissionOutcome with
+            | Some "provider_admitted" -> ProcessingStatus.Checked
+            | Some "tm_validated_only"
+            | Some "not_admitted" -> ProcessingStatus.Rejected
+            | _ -> ProcessingStatus.ClarificationRequired
+          Profile = profile
+          OperationalIntent = operationalIntent
+          CanonicalIntent = canonicalIntent
+          NormalizedJsonLd = normalizedJsonLd
+          CheckedFStarModule = checkedModule
+          TmWitnessStatus = tmWitnessStatus
+          ProviderWitnessStatus = providerWitnessStatus
+          SelectedProfile = selectedProfile
+          FirstFailedWitness = firstFailedWitness
+          AdmissionOutcome = admissionOutcome
+          LlmParse = llmParse
+          Artifacts = artifacts
+          Diagnostics = diagnostics
+          CheckerVersion = checkerVersion
+          CreatedAt = now
+          UpdatedAt = now }
+
+    let private distinctDiagnostics (items: ProcessingDiagnostic list) =
+        items
+        |> List.distinctBy (fun item -> item.Code, item.Message, item.Details |> Option.defaultValue "")
+
+    let private tagAttemptStage stage (attempt: LlmParseAttempt) =
+        if String.IsNullOrWhiteSpace stage then
+            attempt
+        else
+            let source =
+                if String.IsNullOrWhiteSpace attempt.Source then
+                    stage
+                else
+                    $"{stage}:{attempt.Source}"
+
+            { attempt with Source = source }
+
+    let private mergeLlmParseMetadata stage (previous: LlmParseMetadata option) (current: LlmParseMetadata) =
+        let previousProvider = previous |> Option.bind (fun value -> value.Provider)
+        let previousModel = previous |> Option.bind (fun value -> value.Model)
+        let previousPromptVersion = previous |> Option.bind (fun value -> value.PromptVersion)
+        let previousFixtureId = previous |> Option.bind (fun value -> value.FixtureId)
+
+        let previousAttempts =
+            previous
+            |> Option.map (fun value -> value.Attempts)
+            |> Option.defaultValue []
+
+        let currentAttempts = current.Attempts |> List.map (tagAttemptStage stage)
+
+        { Provider = current.Provider |> Option.orElse previousProvider
+          Model = current.Model |> Option.orElse previousModel
+          PromptVersion = current.PromptVersion |> Option.orElse previousPromptVersion
+          SelectedOutcome = current.SelectedOutcome
+          UsedFixture =
+            current.UsedFixture
+            || (previous |> Option.map (fun value -> value.UsedFixture) |> Option.defaultValue false)
+          FixtureId = current.FixtureId |> Option.orElse previousFixtureId
+          Attempts =
+            previousAttempts @ currentAttempts
+            |> List.mapi (fun index attempt -> { attempt with Attempt = index + 1 }) }
+
+    let private admissionRepairIssues (checks: IntentAdmission.AdmissionCheckBundle) =
+        let details =
+            [ Some $"admissionOutcome={checks.AdmissionOutcome}"
+              Some $"tmWitnessStatus={checks.TmWitnessStatus}"
+              Some $"providerWitnessStatus={checks.ProviderWitnessStatus}"
+              checks.SelectedProfile |> Option.map (fun value -> $"selectedProfile={value}")
+              checks.FirstFailedWitness |> Option.map (fun value -> $"firstFailedWitness={value}") ]
+            |> List.choose id
+            |> String.concat "; "
+
+        let summaryMessage =
+            match checks.FirstFailedWitness with
+            | Some witness -> $"The generated F* module failed the downstream admission witness '{witness}'."
+            | None when not checks.CandidateCheck.Success -> "The generated F* candidate module did not type-check."
+            | _ -> "The generated F* module failed downstream admission checks."
+
+        distinctDiagnostics
+            [ diagnostics
+                "DOWNSTREAM_ADMISSION_FAILURE"
+                summaryMessage
+                (if String.IsNullOrWhiteSpace details then None else Some details)
+              yield! checks.CandidateCheck.Diagnostics
+              yield! checks.TmWitness |> Option.map (fun value -> value.Diagnostics) |> Option.defaultValue []
+              yield! checks.ProviderWitness |> Option.map (fun value -> value.Diagnostics) |> Option.defaultValue [] ]
+
+    let private buildNaturalLanguageFailureOutcome
+        now
+        intentId
+        requestId
+        (request: IntentFvo)
+        text
+        llmParse
+        llmPrompt
+        llmResponse
+        failureDiagnostics =
+        let artifacts =
+            writeRequestArtifacts
+                requestId
+                (Some text)
+                llmPrompt
+                llmResponse
+                None
+                None
+                None
+                None
+                None
+                None
+                None
+
+        { NormalizedExpression = request.Expression
+          ProcessingRecord =
+            buildRecord
+                now
+                intentId
+                requestId
+                InputKind.NaturalLanguage
+                (inferProfile request)
+                None
+                None
+                None
+                None
+                None
+                None
+                None
+                None
+                None
+                llmParse
+                (Some artifacts)
+                (distinctDiagnostics failureDiagnostics)
+                None }
+
+    let rec private processTypedIntentAsync
+        repairState
+        classification
+        now
+        requestId
+        intentId
+        (request: IntentFvo)
+        rawText
+        llmParse
+        llmPrompt
+        llmResponse
+        candidate
+        : Task<PipelineOutcome> =
+        task {
+            let outputDir = Path.Combine(artifactRoot (), requestId)
+            let checks = IntentAdmission.runAdmissionChecks outputDir candidate
+
+            let canRetryCheckerFailure =
+                match repairState, rawText, llmParse with
+                | Some state, Some _, Some metadata ->
+                    not metadata.UsedFixture
+                    && state.RetryCount < checkerRepairRetryLimit
+                    && checks.AdmissionOutcome <> "provider_admitted"
+                | _ -> false
+
+            if canRetryCheckerFailure then
+                let state = repairState |> Option.get
+                let text = rawText |> Option.get
+                let retryContext =
+                    { state.GenerationContext with
+                        RepairIssues = admissionRepairIssues checks }
+
+                let! generated =
+                    state.Generator.GenerateIntentModuleAsync(retryContext, text, CancellationToken.None)
+
+                let mergedMetadata =
+                    Some(mergeLlmParseMetadata $"checker_repair_{state.RetryCount + 1}" llmParse generated.Metadata)
+
+                match generated.Envelope with
+                | Some envelope when envelope.Status = "parsed" ->
+                    match envelope.ModuleText with
+                    | None ->
+                        return
+                            buildNaturalLanguageFailureOutcome
+                                now
+                                intentId
+                                requestId
+                                request
+                                text
+                                mergedMetadata
+                                generated.PromptText
+                                generated.RawResponseText
+                                (generated.Diagnostics @ [ diagnostics "MISSING_MODULE_TEXT" "The parsed result omitted moduleText." None ])
+                    | Some moduleText ->
+                        match IntentAdmission.tryParseCandidateModule moduleText with
+                        | Error parseIssues ->
+                            return
+                                buildNaturalLanguageFailureOutcome
+                                    now
+                                    intentId
+                                    requestId
+                                    request
+                                    text
+                                    mergedMetadata
+                                    generated.PromptText
+                                    generated.RawResponseText
+                                    (generated.Diagnostics @ parseIssues)
+                        | Ok parsed ->
+                            let repairedCandidate =
+                                { parsed with
+                                    Intent =
+                                        { parsed.Intent with
+                                            SourceText = Some text } }
+
+                            return!
+                                processTypedIntentAsync
+                                    (Some
+                                        { state with
+                                            RetryCount = state.RetryCount + 1 })
+                                    classification
+                                    now
+                                    requestId
+                                    intentId
+                                    request
+                                    rawText
+                                    mergedMetadata
+                                    generated.PromptText
+                                    generated.RawResponseText
+                                    repairedCandidate
+                | Some _ ->
+                    return
+                        buildNaturalLanguageFailureOutcome
+                            now
+                            intentId
+                            requestId
+                            request
+                            text
+                            mergedMetadata
+                            generated.PromptText
+                            generated.RawResponseText
+                            generated.Diagnostics
+                | None ->
+                    return
+                        buildNaturalLanguageFailureOutcome
+                            now
+                            intentId
+                            requestId
+                            request
+                            text
+                            mergedMetadata
+                            generated.PromptText
+                            generated.RawResponseText
+                            generated.Diagnostics
+            else
+                let operationalIntent = IntentAdmission.toOperationalIntentRecord candidate.Intent
+                let canonical = IntentAdmission.toCanonicalIntent candidate.Intent
+                let ontologyValidation =
+                    JsonSerializer.SerializeToElement(canonical, serializerOptions)
+                    |> RawIntentContracts.validateOntologyRawIntent
+
+                let normalizedJsonLd =
+                    if ontologyValidation.Accepted then
+                        Some(IntentAdmission.emitJsonLd canonical)
+                    else
+                        None
+
+                let diagnostics =
+                    distinctDiagnostics
+                        [ yield! checks.CandidateCheck.Diagnostics
+                          yield! checks.TmWitness |> Option.map (fun value -> value.Diagnostics) |> Option.defaultValue []
+                          yield! checks.ProviderWitness |> Option.map (fun value -> value.Diagnostics) |> Option.defaultValue []
+                          yield! ontologyValidation.Issues ]
+
+                let artifacts =
+                    writeRequestArtifacts
+                        requestId
+                        rawText
+                        llmPrompt
+                        llmResponse
+                        (Some operationalIntent)
+                        (Some canonical)
+                        (Some ontologyValidation.Report)
+                        normalizedJsonLd
+                        (Some checks.CandidateCheck)
+                        checks.TmWitness
+                        checks.ProviderWitness
+
+                let processingRecord =
+                    buildRecord
+                        now
+                        intentId
+                        requestId
+                        classification
+                        canonical.Profile
+                        (Some operationalIntent)
+                        (Some canonical)
+                        normalizedJsonLd
+                        (checks.ProviderWitness |> Option.filter (fun value -> value.Success) |> Option.map (fun value -> value.ModuleText))
+                        (Some checks.TmWitnessStatus)
+                        (Some checks.ProviderWitnessStatus)
+                        checks.SelectedProfile
+                        checks.FirstFailedWitness
+                        (Some checks.AdmissionOutcome)
+                        llmParse
+                        (Some artifacts)
+                        diagnostics
+                        (checks.ProviderWitness |> Option.bind (fun value -> value.CheckerVersion) |> Option.orElse checks.CandidateCheck.CheckerVersion)
+
+                let normalizedExpression =
+                    match normalizedJsonLd, checks.AdmissionOutcome with
+                    | Some normalized, "provider_admitted" -> normalizedExpression request normalized
+                    | _ -> request.Expression
+
+                return
+                    { NormalizedExpression = normalizedExpression
+                      ProcessingRecord = processingRecord }
+        }
 
     let processIntentWithContextAsync
         (rawIntentGenerator: IRawIntentGenerator)
@@ -659,180 +652,60 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
             | InputKind.StructuredCanonical
             | InputKind.StructuredNormalizable ->
                 let canonical = normalizeStructured request classification
-                let normalizedJsonLd = emitJsonLd canonical
-                let artifacts =
-                    writeRequestArtifacts
-                        requestId
-                        None
-                        None
-                        None
-                        None
-                        (Some canonical)
-                        None
-                        (Some normalizedJsonLd)
-                        None
 
-                return
-                    { NormalizedExpression = normalizedExpression request normalizedJsonLd
-                      ProcessingRecord =
-                        { IntentId = intentId
-                          RequestId = requestId
-                          Classification = classification
-                          Status =
-                            if classification = InputKind.StructuredCanonical
-                            then ProcessingStatus.Bypassed
-                            else ProcessingStatus.Normalized
-                          Profile = canonical.Profile
-                          CanonicalIntent = Some canonical
-                          NormalizedJsonLd = Some normalizedJsonLd
-                          CheckedFStarModule = None
-                          LlmParse = None
-                          Artifacts = Some artifacts
-                          Diagnostics = []
-                          CheckerVersion = None
-                          CreatedAt = now
-                          UpdatedAt = now } }
-            | InputKind.NaturalLanguage ->
-                match extractNaturalLanguageText request.Expression with
-                | None ->
+                match IntentAdmission.tryInterpretCanonicalIntent (request.Description |> Option.defaultValue request.Name) canonical with
+                | Error conversionIssues ->
+                    let artifacts =
+                        writeRequestArtifacts
+                            requestId
+                            None
+                            None
+                            None
+                            None
+                            (Some canonical)
+                            None
+                            None
+                            None
+                            None
+                            None
+
                     return
                         { NormalizedExpression = request.Expression
                           ProcessingRecord =
-                            { IntentId = intentId
-                              RequestId = requestId
-                              Classification = InputKind.NaturalLanguage
-                              Status = ProcessingStatus.ClarificationRequired
-                              Profile = inferProfile request
-                              CanonicalIntent = None
-                              NormalizedJsonLd = None
-                              CheckedFStarModule = None
-                              LlmParse = None
-                              Artifacts = None
-                              Diagnostics = [ diagnostics "MISSING_TEXT" "The natural-language input was empty." None ]
-                              CheckerVersion = None
-                              CreatedAt = now
-                              UpdatedAt = now } }
-                | Some text ->
-                    let! generated =
-                        rawIntentGenerator.GenerateSemanticCoreAsync(generationContext, text, CancellationToken.None)
+                            buildRecord
+                                now
+                                intentId
+                                requestId
+                                classification
+                                canonical.Profile
+                                None
+                                (Some canonical)
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                (Some artifacts)
+                                conversionIssues
+                                None }
+                | Ok restrictedIntent ->
+                    let moduleName = $"StructuredIntent_{IntentAdmission.sanitizeModuleSegment requestId}"
+                    let moduleText = IntentAdmission.buildCandidateModule moduleName restrictedIntent
 
-                    let rawSemanticCore =
-                        generated.Envelope |> Option.bind (fun envelope -> envelope.SemanticCore)
-
-                    match generated.Envelope with
-                    | Some envelope when envelope.Status = "parsed" ->
-                        match assembleRawIntent request text envelope with
-                        | Error diags ->
-                            let artifacts =
-                                writeRequestArtifacts
-                                    requestId
-                                    (Some text)
-                                    generated.PromptText
-                                    generated.RawResponseText
-                                    rawSemanticCore
-                                    None
-                                    None
-                                    None
-                                    None
-
-                            return
-                                { NormalizedExpression = request.Expression
-                                  ProcessingRecord =
-                                    { IntentId = intentId
-                                      RequestId = requestId
-                                      Classification = InputKind.NaturalLanguage
-                                      Status = ProcessingStatus.ClarificationRequired
-                                      Profile = inferProfile request
-                                      CanonicalIntent = None
-                                      NormalizedJsonLd = None
-                                      CheckedFStarModule = None
-                                      LlmParse = Some generated.Metadata
-                                      Artifacts = Some artifacts
-                                      Diagnostics = generated.Diagnostics @ diags
-                                      CheckerVersion = None
-                                      CreatedAt = now
-                                      UpdatedAt = now } }
-                        | Ok canonical ->
-                            let ontologyValidation = validateOntologyRawIntent canonical
-
-                            if not ontologyValidation.Accepted then
-                                let artifacts =
-                                    writeRequestArtifacts
-                                        requestId
-                                        (Some text)
-                                        generated.PromptText
-                                        generated.RawResponseText
-                                        rawSemanticCore
-                                        (Some canonical)
-                                        (Some ontologyValidation.Report)
-                                        None
-                                        None
-
-                                return
-                                    { NormalizedExpression = request.Expression
-                                      ProcessingRecord =
-                                        { IntentId = intentId
-                                          RequestId = requestId
-                                          Classification = InputKind.NaturalLanguage
-                                          Status = ProcessingStatus.ClarificationRequired
-                                          Profile = canonical.Profile
-                                          CanonicalIntent = Some canonical
-                                          NormalizedJsonLd = None
-                                          CheckedFStarModule = None
-                                          LlmParse = Some generated.Metadata
-                                          Artifacts = Some artifacts
-                                          Diagnostics = generated.Diagnostics @ ontologyValidation.Issues
-                                          CheckerVersion = None
-                                          CreatedAt = now
-                                          UpdatedAt = now } }
-                            else
-                                let normalizedJsonLd = emitJsonLd canonical
-                                let moduleName = $"CheckedIntent_{requestId}"
-                                let generatedPath = Path.Combine(Path.Combine(artifactRoot (), requestId), $"{moduleName}.fst")
-                                Directory.CreateDirectory(Path.GetDirectoryName(generatedPath)) |> ignore
-                                let sidecar = runFStarCheck generatedPath canonical
-
-                                let artifacts =
-                                    writeRequestArtifacts
-                                        requestId
-                                        (Some text)
-                                        generated.PromptText
-                                        generated.RawResponseText
-                                        rawSemanticCore
-                                        (Some canonical)
-                                        (Some ontologyValidation.Report)
-                                        (if sidecar.Success then Some normalizedJsonLd else None)
-                                        (Some sidecar)
-
-                                return
-                                    { NormalizedExpression =
-                                        if sidecar.Success then normalizedExpression request normalizedJsonLd else request.Expression
-                                      ProcessingRecord =
-                                        { IntentId = intentId
-                                          RequestId = requestId
-                                          Classification = InputKind.NaturalLanguage
-                                          Status =
-                                            if sidecar.Success
-                                            then ProcessingStatus.Checked
-                                            else ProcessingStatus.ClarificationRequired
-                                          Profile = canonical.Profile
-                                          CanonicalIntent = Some canonical
-                                          NormalizedJsonLd = if sidecar.Success then Some normalizedJsonLd else None
-                                          CheckedFStarModule = if sidecar.Success then Some sidecar.GeneratedModule else None
-                                          LlmParse = Some generated.Metadata
-                                          Artifacts = Some artifacts
-                                          Diagnostics = generated.Diagnostics @ sidecar.Diagnostics
-                                          CheckerVersion = sidecar.CheckerVersion
-                                          CreatedAt = now
-                                          UpdatedAt = now } }
-                    | Some envelope ->
+                    match IntentAdmission.tryParseCandidateModule moduleText with
+                    | Error parseIssues ->
                         let artifacts =
                             writeRequestArtifacts
                                 requestId
-                                (Some text)
-                                generated.PromptText
-                                generated.RawResponseText
-                                rawSemanticCore
+                                None
+                                None
+                                None
+                                None
+                                (Some canonical)
+                                None
                                 None
                                 None
                                 None
@@ -841,20 +714,207 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
                         return
                             { NormalizedExpression = request.Expression
                               ProcessingRecord =
-                                { IntentId = intentId
-                                  RequestId = requestId
-                                  Classification = InputKind.NaturalLanguage
-                                  Status = ProcessingStatus.ClarificationRequired
-                                  Profile = inferProfile request
-                                  CanonicalIntent = None
-                                  NormalizedJsonLd = None
-                                  CheckedFStarModule = None
-                                  LlmParse = Some generated.Metadata
-                                  Artifacts = Some artifacts
-                                  Diagnostics = generated.Diagnostics
-                                  CheckerVersion = None
-                                  CreatedAt = now
-                                  UpdatedAt = now } }
+                                buildRecord
+                                    now
+                                    intentId
+                                    requestId
+                                    classification
+                                    canonical.Profile
+                                    None
+                                    (Some canonical)
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    (Some artifacts)
+                                    parseIssues
+                                    None }
+                    | Ok candidate ->
+                        return!
+                            processTypedIntentAsync
+                                None
+                                classification
+                                now
+                                requestId
+                                intentId
+                                request
+                                None
+                                None
+                                None
+                                None
+                                candidate
+            | InputKind.NaturalLanguage ->
+                match extractNaturalLanguageText request.Expression with
+                | None ->
+                    return
+                        { NormalizedExpression = request.Expression
+                          ProcessingRecord =
+                            buildRecord
+                                now
+                                intentId
+                                requestId
+                                InputKind.NaturalLanguage
+                                (inferProfile request)
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                [ diagnostics "MISSING_TEXT" "The natural-language input was empty." None ]
+                                None }
+                | Some text ->
+                    let! generated =
+                        rawIntentGenerator.GenerateIntentModuleAsync(generationContext, text, CancellationToken.None)
+
+                    match generated.Envelope with
+                    | Some envelope when envelope.Status = "parsed" ->
+                        match envelope.ModuleText with
+                        | None ->
+                            let artifacts =
+                                writeRequestArtifacts
+                                    requestId
+                                    (Some text)
+                                    generated.PromptText
+                                    generated.RawResponseText
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+
+                            return
+                                { NormalizedExpression = request.Expression
+                                  ProcessingRecord =
+                                    buildRecord
+                                        now
+                                        intentId
+                                        requestId
+                                        InputKind.NaturalLanguage
+                                        (inferProfile request)
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        (Some generated.Metadata)
+                                        (Some artifacts)
+                                        (generated.Diagnostics @ [ diagnostics "MISSING_MODULE_TEXT" "The parsed result omitted moduleText." None ])
+                                        None }
+                        | Some moduleText ->
+                            match IntentAdmission.tryParseCandidateModule moduleText with
+                            | Error parseIssues ->
+                                let artifacts =
+                                    writeRequestArtifacts
+                                        requestId
+                                        (Some text)
+                                        generated.PromptText
+                                        generated.RawResponseText
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+                                        None
+
+                                return
+                                    { NormalizedExpression = request.Expression
+                                      ProcessingRecord =
+                                        buildRecord
+                                            now
+                                            intentId
+                                            requestId
+                                            InputKind.NaturalLanguage
+                                            (inferProfile request)
+                                            None
+                                            None
+                                            None
+                                            None
+                                            None
+                                            None
+                                            None
+                                            None
+                                            None
+                                            (Some generated.Metadata)
+                                            (Some artifacts)
+                                            (generated.Diagnostics @ parseIssues)
+                                            None }
+                            | Ok parsed ->
+                                let candidate =
+                                    { parsed with
+                                        Intent =
+                                            { parsed.Intent with
+                                                SourceText = Some text } }
+
+                                return!
+                                    processTypedIntentAsync
+                                        (Some
+                                            { Generator = rawIntentGenerator
+                                              GenerationContext = generationContext
+                                              RetryCount = 0 })
+                                        InputKind.NaturalLanguage
+                                        now
+                                        requestId
+                                        intentId
+                                        request
+                                        (Some text)
+                                        (Some generated.Metadata)
+                                        generated.PromptText
+                                        generated.RawResponseText
+                                        candidate
+                    | Some _ ->
+                        let artifacts =
+                            writeRequestArtifacts
+                                requestId
+                                (Some text)
+                                generated.PromptText
+                                generated.RawResponseText
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+                                None
+
+                        return
+                            { NormalizedExpression = request.Expression
+                              ProcessingRecord =
+                                buildRecord
+                                    now
+                                    intentId
+                                    requestId
+                                    InputKind.NaturalLanguage
+                                    (inferProfile request)
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    (Some generated.Metadata)
+                                    (Some artifacts)
+                                    generated.Diagnostics
+                                    None }
                     | None ->
                         let artifacts =
                             writeRequestArtifacts
@@ -867,47 +927,58 @@ let checked_intent : checked_intent ontology_profile raw_intent_ir =
                                 None
                                 None
                                 None
+                                None
+                                None
 
                         return
                             { NormalizedExpression = request.Expression
                               ProcessingRecord =
-                                { IntentId = intentId
-                                  RequestId = requestId
-                                  Classification = InputKind.NaturalLanguage
-                                  Status = ProcessingStatus.ClarificationRequired
-                                  Profile = inferProfile request
-                                  CanonicalIntent = None
-                                  NormalizedJsonLd = None
-                                  CheckedFStarModule = None
-                                  LlmParse = Some generated.Metadata
-                                  Artifacts = Some artifacts
-                                  Diagnostics = generated.Diagnostics
-                                  CheckerVersion = None
-                                  CreatedAt = now
-                                  UpdatedAt = now } }
+                                buildRecord
+                                    now
+                                    intentId
+                                    requestId
+                                    InputKind.NaturalLanguage
+                                    (inferProfile request)
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    None
+                                    (Some generated.Metadata)
+                                    (Some artifacts)
+                                    generated.Diagnostics
+                                    None }
             | InputKind.Ambiguous
             | _ ->
                 return
                     { NormalizedExpression = request.Expression
                       ProcessingRecord =
-                        { IntentId = intentId
-                          RequestId = requestId
-                          Classification = InputKind.Ambiguous
-                          Status = ProcessingStatus.ClarificationRequired
-                          Profile = inferProfile request
-                          CanonicalIntent = None
-                          NormalizedJsonLd = None
-                          CheckedFStarModule = None
-                          LlmParse = None
-                          Artifacts = None
-                          Diagnostics =
+                        buildRecord
+                            now
+                            intentId
+                            requestId
+                            InputKind.Ambiguous
+                            (inferProfile request)
+                            None
+                            None
+                            None
+                            None
+                            None
+                            None
+                            None
+                            None
+                            None
+                            None
+                            None
                             [ diagnostics
                                 "AMBIGUOUS_INPUT"
                                 "The expression was neither recognizable JSON-LD nor recognizable natural language."
                                 None ]
-                          CheckerVersion = None
-                          CreatedAt = now
-                          UpdatedAt = now } }
+                            None }
         }
 
     let processIntentAsync

@@ -25,11 +25,11 @@ let selected_profile : profile =
 let measurable : measurable_intent silver_profile_intent =
   mk_measurable silver_profile_intent
 
+let quantity_checked : quantity_checked_intent silver_profile_intent =
+  mk_quantity_checked silver_profile_intent
+
 let window_checked : window_checked_intent silver_profile_intent =
   mk_window_checked silver_profile_intent
-
-let tm_checked : tm_checked_intent silver_profile_intent =
-  mk_tm_checked silver_profile_intent
 
 let profiled : profiled_intent selected_profile silver_profile_intent =
   mk_profiled selected_profile silver_profile_intent

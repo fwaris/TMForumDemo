@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tmf921:fstar-demo:critical-service-intent",
+  "title": "Normalized Critical Service Intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "intentName",
+    "facility",
+    "serviceClass",
+    "eventDate",
+    "startHour",
+    "endHour",
+    "timezone",
+    "criticalDeviceCount",
+    "auxiliaryEndpointCount",
+    "maxEndToEndLatencyMs",
+    "reportingIntervalMinutes",
+    "immediateDegradationAlerts",
+    "safetyPolicyDeclared",
+    "preserveEmergencyTraffic",
+    "requestsPublicSafetyPreemption"
+  ],
+  "properties": {
+    "intentName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "facility": {
+      "type": "string",
+      "minLength": 1
+    },
+    "serviceClass": {
+      "type": "string",
+      "enum": [
+        "ultra-reliable-5g-clinical"
+      ]
+    },
+    "eventDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "startHour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23
+    },
+    "endHour": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 23
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 3
+    },
+    "criticalDeviceCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "auxiliaryEndpointCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "maxEndToEndLatencyMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "reportingIntervalMinutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440
+    },
+    "immediateDegradationAlerts": {
+      "type": "boolean"
+    },
+    "safetyPolicyDeclared": {
+      "type": "boolean"
+    },
+    "preserveEmergencyTraffic": {
+      "type": "boolean"
+    },
+    "requestsPublicSafetyPreemption": {
+      "type": "boolean"
+    }
+  }
+}

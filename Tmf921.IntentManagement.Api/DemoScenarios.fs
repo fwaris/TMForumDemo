@@ -49,6 +49,9 @@ module DemoScenarios =
 
     type DemoTmIntent =
         { IntentName: string
+          ScenarioFamily: string option
+          TargetName: string option
+          TargetKind: string option
           Venue: string option
           ServiceClass: string option
           EventDate: DateOnly option
@@ -56,9 +59,13 @@ module DemoScenarios =
           EndHour: int option
           Timezone: string option
           DeviceCount: int option
+          PrimaryDeviceCount: int option
+          AuxiliaryEndpointCount: int option
           MaxUplinkLatencyMs: int option
+          MaxLatencyMs: int option
           ReportingIntervalMinutes: int option
           ImmediateDegradationAlerts: bool
+          SafetyPolicyDeclared: bool
           PreserveEmergencyTraffic: bool
           RequestsPublicSafetyPreemption: bool
           OriginalText: string }
@@ -81,6 +88,7 @@ module DemoScenarios =
 
     type DemoScenarioDefinition =
         { Id: string
+          ScenarioFamily: IntentAdmission.IntentScenarioFamily
           Title: string
           Kicker: string
           Text: string
@@ -89,6 +97,7 @@ module DemoScenarios =
           ExpectedJsonAccepted: bool
           ExpectedFailedWitness: string option
           Story: string
+          ReferenceIntent: IntentAdmission.RestrictedIntent option
           FStarFile: string option
           FStarExpectedSuccess: bool option }
 
@@ -331,6 +340,9 @@ module DemoScenarios =
 
     let private emptyDemoIntent text =
         { IntentName = "LiveBroadcastIntent"
+          ScenarioFamily = None
+          TargetName = None
+          TargetKind = None
           Venue = None
           ServiceClass = None
           EventDate = None
@@ -338,9 +350,13 @@ module DemoScenarios =
           EndHour = None
           Timezone = None
           DeviceCount = None
+          PrimaryDeviceCount = None
+          AuxiliaryEndpointCount = None
           MaxUplinkLatencyMs = None
+          MaxLatencyMs = None
           ReportingIntervalMinutes = None
           ImmediateDegradationAlerts = false
+          SafetyPolicyDeclared = false
           PreserveEmergencyTraffic = false
           RequestsPublicSafetyPreemption = false
           OriginalText = text }
@@ -406,6 +422,9 @@ module DemoScenarios =
                 || containsText "preempt" value)
 
         { IntentName = canonical.IntentName
+          ScenarioFamily = Some "LiveBroadcast"
+          TargetName = venue
+          TargetKind = Some "VenueTarget"
           Venue = venue
           ServiceClass = serviceClass
           EventDate = eventDate
@@ -413,7 +432,10 @@ module DemoScenarios =
           EndHour = endHour
           Timezone = timezone |> trimToOption
           DeviceCount = capacityExpectation |> Option.bind parseQuantityValue
+          PrimaryDeviceCount = capacityExpectation |> Option.bind parseQuantityValue
+          AuxiliaryEndpointCount = None
           MaxUplinkLatencyMs = latencyExpectation |> Option.bind parseQuantityValue
+          MaxLatencyMs = latencyExpectation |> Option.bind parseQuantityValue
           ReportingIntervalMinutes = reportingExpectation |> Option.bind parseReportingMinutes
           ImmediateDegradationAlerts =
             match alertingExpectation with
@@ -422,36 +444,192 @@ module DemoScenarios =
                 |> List.exists (containsText "immediate")
                 || true
             | None -> false
+          SafetyPolicyDeclared = preserveEmergencyTraffic || requestsPublicSafetyPreemption
           PreserveEmergencyTraffic = preserveEmergencyTraffic
           RequestsPublicSafetyPreemption = requestsPublicSafetyPreemption
           OriginalText = text }
 
-    let validateTmIntent (intent: DemoTmIntent) =
-        let issues =
-            [ if intent.Venue.IsNone then
-                  issue "TM_MISSING_TARGET" "Intent is missing a recognizable venue target."
-              if intent.ServiceClass.IsNone then
-                  issue "TM_MISSING_SERVICE_CLASS" "Intent is missing a recognizable service class."
-              if intent.EventDate.IsNone then
-                  issue "TM_MISSING_DATE" "Intent is missing an event date."
-              if intent.StartHour.IsNone || intent.EndHour.IsNone then
-                  issue "TM_MISSING_WINDOW" "Intent is missing a usable time window."
-              if intent.Timezone.IsNone then
-                  issue "TM_MISSING_TIMEZONE" "Intent is missing a timezone."
-              if intent.DeviceCount.IsNone then
-                  issue "TM_MISSING_DEVICE_COUNT" "Intent is missing a measurable device-count expectation."
-              if intent.MaxUplinkLatencyMs.IsNone then
-                  issue "TM_MISSING_LATENCY" "Intent is missing a measurable uplink latency expectation."
-              if intent.ReportingIntervalMinutes.IsNone then
-                  issue "TM_MISSING_REPORTING" "Intent is missing a reporting interval."
-              if not intent.ImmediateDegradationAlerts then
-                  issue "TM_MISSING_ALERT_POLICY" "Intent is missing an immediate degradation alert expectation." ]
+    let private optionOr first second =
+        match first with
+        | Some _ -> first
+        | None -> second
 
-        match intent.StartHour, intent.EndHour with
-        | Some startHour, Some endHour when startHour >= endHour ->
-            issues
-            @ [ issue "TM_INVALID_WINDOW" "Intent time window is invalid because the start is not before the end." ]
-        | _ -> issues
+    let private demoIntentFromRestricted (text: string) (intent: IntentAdmission.RestrictedIntent) =
+        let targetName = intent.TargetName |> trimToOption
+        let targetKind = intent.TargetKind |> Option.map IntentAdmission.targetKindName
+        let primaryDeviceCount = intent.PrimaryDeviceCount
+        let maxLatencyMs = intent.MaxLatencyMs
+
+        { IntentName = intent.IntentName
+          ScenarioFamily = Some(IntentAdmission.familyName intent.ScenarioFamily)
+          TargetName = targetName
+          TargetKind = targetKind
+          Venue =
+            match intent.ScenarioFamily with
+            | IntentAdmission.LiveBroadcast -> targetName
+            | IntentAdmission.CriticalService -> None
+          ServiceClass = intent.ServiceClass |> trimToOption
+          EventDate = intent.EventDate
+          StartHour = intent.StartHour
+          EndHour = intent.EndHour
+          Timezone = intent.Timezone |> trimToOption
+          DeviceCount =
+            match intent.ScenarioFamily with
+            | IntentAdmission.LiveBroadcast -> primaryDeviceCount
+            | IntentAdmission.CriticalService -> None
+          PrimaryDeviceCount = primaryDeviceCount
+          AuxiliaryEndpointCount = intent.AuxiliaryEndpointCount
+          MaxUplinkLatencyMs =
+            match intent.ScenarioFamily with
+            | IntentAdmission.LiveBroadcast -> maxLatencyMs
+            | IntentAdmission.CriticalService -> None
+          MaxLatencyMs = maxLatencyMs
+          ReportingIntervalMinutes = intent.ReportingIntervalMinutes
+          ImmediateDegradationAlerts = intent.ImmediateDegradationAlerts
+          SafetyPolicyDeclared = intent.SafetyPolicyDeclared
+          PreserveEmergencyTraffic = intent.PreserveEmergencyTraffic
+          RequestsPublicSafetyPreemption = intent.RequestPublicSafetyPreemption
+          OriginalText = text }
+
+    let private demoIntentFromOperational (text: string) (record: OperationalIntentRecord) =
+        IntentAdmission.tryFromOperationalIntentRecord record
+        |> Result.toOption
+        |> Option.map (demoIntentFromRestricted text)
+
+    let private restrictedFromDemoIntent (intent: DemoTmIntent) : IntentAdmission.RestrictedIntent =
+        let family =
+            match intent.ScenarioFamily with
+            | Some "CriticalService" -> IntentAdmission.CriticalService
+            | _ -> IntentAdmission.LiveBroadcast
+
+        let targetName = intent.TargetName |> optionOr intent.Venue
+        let targetKind =
+            match intent.TargetKind with
+            | Some "FacilityTarget" -> Some IntentAdmission.FacilityTarget
+            | Some "VenueTarget" -> Some IntentAdmission.VenueTarget
+            | _ ->
+                match family with
+                | IntentAdmission.LiveBroadcast when targetName.IsSome -> Some IntentAdmission.VenueTarget
+                | IntentAdmission.CriticalService when targetName.IsSome -> Some IntentAdmission.FacilityTarget
+                | _ -> None
+
+        { IntentName = intent.IntentName
+          ScenarioFamily = family
+          TargetName = targetName
+          TargetKind = targetKind
+          ServiceClass = intent.ServiceClass
+          EventDate = intent.EventDate
+          StartHour = intent.StartHour
+          EndHour = intent.EndHour
+          Timezone = intent.Timezone
+          PrimaryDeviceCount = intent.PrimaryDeviceCount |> optionOr intent.DeviceCount
+          AuxiliaryEndpointCount = intent.AuxiliaryEndpointCount
+          MaxLatencyMs = intent.MaxLatencyMs |> optionOr intent.MaxUplinkLatencyMs
+          ReportingIntervalMinutes = intent.ReportingIntervalMinutes
+          ImmediateDegradationAlerts = intent.ImmediateDegradationAlerts
+          SafetyPolicyDeclared = intent.SafetyPolicyDeclared
+          PreserveEmergencyTraffic = intent.PreserveEmergencyTraffic
+          RequestPublicSafetyPreemption = intent.RequestsPublicSafetyPreemption
+          SourceText = Some intent.OriginalText }
+
+    let private readArtifactText (reference: ArtifactReference option) =
+        reference
+        |> Option.bind (fun artifact ->
+            if File.Exists artifact.Path then
+                Some(File.ReadAllText(artifact.Path, Encoding.UTF8))
+            else
+                None)
+
+    let private excerptText (text: string) =
+        if String.IsNullOrWhiteSpace text then
+            None
+        else if text.Length <= 2000 then
+            Some text
+        else
+            Some(text.Substring(0, 2000) + "\n... output truncated ...")
+
+    let private checkerExcerptFromPath path =
+        if String.IsNullOrWhiteSpace path || not (File.Exists path) then
+            None
+        else
+            let document = JsonDocument.Parse(File.ReadAllText(path, Encoding.UTF8))
+            let root = document.RootElement
+
+            let property (name: string) =
+                let mutable element = Unchecked.defaultof<JsonElement>
+                if root.TryGetProperty(name, &element) then
+                    element.GetString() |> Option.ofObj |> trimToOption
+                else
+                    None
+
+            [ property "stderr"; property "stdout" ]
+            |> List.choose id
+            |> List.tryFind (String.IsNullOrWhiteSpace >> not)
+            |> Option.map excerptText
+            |> Option.defaultValue None
+
+    let private failedWitnessIssue witness =
+        match witness with
+        | "measurable_intent" ->
+            Some(issue "TM_MEASURABLE_INTENT" "The request is still missing measurable TM intent fields.")
+        | "quantity_checked_intent" ->
+            Some(issue "TM_QUANTITY_INTENT" "The request contains non-positive or missing measured quantities.")
+        | "window_checked_intent" ->
+            Some(issue "PROVIDER_WINDOW" "Provider refinement rejected the requested service window.")
+        | "profiled_intent" ->
+            Some(issue "PROVIDER_PROFILE" "The normalized target does not resolve to a supported provider profile.")
+        | "capacity_checked_intent" ->
+            Some(issue "PROVIDER_CAPACITY" "The request exceeds provider capacity, reporting, or operating-window constraints.")
+        | "latency_checked_intent" ->
+            Some(issue "PROVIDER_LATENCY" "The request violates the resolved provider profile's latency floor.")
+        | "policy_checked_intent" ->
+            Some(issue "PROVIDER_POLICY" "The request violates alerting, safety, or protected-traffic policy constraints.")
+        | "candidate_module_compile" ->
+            Some(issue "FSTAR_CANDIDATE" "The generated candidate module did not compile in F*.")
+        | _ -> None
+
+    let validateTmIntent (intent: DemoTmIntent) =
+        let restricted = restrictedFromDemoIntent intent
+
+        let issues =
+            [ if restricted.TargetName.IsNone then
+                  issue "TM_MISSING_TARGET" "Intent is missing a recognizable target."
+              if restricted.TargetKind.IsNone then
+                  issue "TM_MISSING_TARGET_KIND" "Intent is missing a recognized target kind."
+              if restricted.ServiceClass.IsNone then
+                  issue "TM_MISSING_SERVICE_CLASS" "Intent is missing a recognizable service class."
+              if restricted.EventDate.IsNone then
+                  issue "TM_MISSING_DATE" "Intent is missing an event date."
+              if restricted.StartHour.IsNone || restricted.EndHour.IsNone then
+                  issue "TM_MISSING_WINDOW" "Intent is missing a usable time window."
+              if restricted.Timezone.IsNone then
+                  issue "TM_MISSING_TIMEZONE" "Intent is missing a timezone."
+              if restricted.PrimaryDeviceCount.IsNone then
+                  issue "TM_MISSING_DEVICE_COUNT" "Intent is missing a measurable primary device-count expectation."
+              if restricted.ScenarioFamily = IntentAdmission.CriticalService && restricted.AuxiliaryEndpointCount.IsNone then
+                  issue "TM_MISSING_AUXILIARY_COUNT" "Intent is missing a measurable auxiliary endpoint-count expectation."
+              if restricted.MaxLatencyMs.IsNone then
+                  issue "TM_MISSING_LATENCY" "Intent is missing a measurable latency expectation."
+              if restricted.ReportingIntervalMinutes.IsNone then
+                  issue "TM_MISSING_REPORTING" "Intent is missing a reporting interval."
+              match restricted.PrimaryDeviceCount with
+              | Some value when value <= 0 ->
+                  issue "TM_NON_POSITIVE_DEVICE_COUNT" "Intent device counts must be positive quantities."
+              | _ -> ()
+              match restricted.AuxiliaryEndpointCount with
+              | Some value when value <= 0 ->
+                  issue "TM_NON_POSITIVE_AUXILIARY_COUNT" "Intent auxiliary endpoint counts must be positive quantities."
+              | _ -> ()
+              match restricted.MaxLatencyMs with
+              | Some value when value <= 0 ->
+                  issue "TM_NON_POSITIVE_LATENCY" "Intent latency bounds must be positive quantities."
+              | _ -> ()
+              match restricted.ReportingIntervalMinutes with
+              | Some value when value <= 0 ->
+                  issue "TM_NON_POSITIVE_REPORTING" "Intent reporting intervals must be positive quantities."
+              | _ -> () ]
+
+        issues |> List.distinctBy (fun value -> value.Code, value.Message)
 
     let private profileForVenue venue =
         match venue with
@@ -493,152 +671,95 @@ module DemoScenarios =
         | None -> false
 
     let validateProviderIntent (intent: DemoTmIntent) =
-        match intent.Venue with
-        | None ->
-            { SelectedProfile = None
-              Checks = [ issue "PROVIDER_NO_VENUE" "Provider validation requires a known venue." ] }
-        | Some venue ->
-            match profileForVenue venue with
-            | None ->
-                { SelectedProfile = None
-                  Checks = [ issue "PROVIDER_UNKNOWN_VENUE" $"Venue '{venue}' is not supported by the provider demo model." ] }
-            | Some profile ->
-                let checks =
-                    [ match intent.DeviceCount with
-                      | Some devices when devices <= maxDevices profile -> ()
-                      | Some devices ->
-                          yield
-                              issue
-                                  "PROVIDER_DEVICE_COUNT"
-                                  $"Requested device count {devices} exceeds the {profileName profile} capacity limit of {maxDevices profile}."
-                      | None -> yield issue "PROVIDER_MISSING_DEVICE_COUNT" "Device count is required for provider validation."
+        let restricted = restrictedFromDemoIntent intent
 
-                      match intent.MaxUplinkLatencyMs with
-                      | Some latency when latency >= minLatencyBound profile -> ()
-                      | Some latency ->
-                          yield
-                              issue
-                                  "PROVIDER_LATENCY_BOUND"
-                                  $"Requested uplink latency under {latency} ms is below the admissible {minLatencyBound profile} ms bound for {profileName profile}."
-                      | None -> yield issue "PROVIDER_MISSING_LATENCY" "Latency bound is required for provider validation."
-
-                      match intent.StartHour, intent.EndHour with
-                      | Some startHour, Some endHour when startHour >= 6 && endHour <= 23 -> ()
-                      | Some _, Some _ ->
-                          yield
-                              issue
-                                  "PROVIDER_WINDOW"
-                                  "Requested booking window is outside the provider's allowed operating window of 06:00 to 23:00."
-                      | _ -> yield issue "PROVIDER_MISSING_WINDOW" "Booking window is required for provider validation."
-
-                      match intent.ReportingIntervalMinutes with
-                      | Some minutes when minutes >= 15 -> ()
-                      | Some minutes ->
-                          yield
-                              issue
-                                  "PROVIDER_REPORTING"
-                                  $"Requested reporting interval of {minutes} minutes is below the provider minimum of 15 minutes."
-                      | None -> yield issue "PROVIDER_MISSING_REPORTING" "Reporting interval is required for provider validation."
-
-                      if intent.RequestsPublicSafetyPreemption then
-                          yield
-                              issue
-                                  "PROVIDER_PROTECTED_TRAFFIC"
-                                  "Requested policy would preempt protected public-safety capacity."
-
-                      if not intent.PreserveEmergencyTraffic then
-                          yield
-                              issue
-                                  "PROVIDER_EMERGENCY_TRAFFIC"
-                                  "Intent must explicitly preserve emergency-service traffic." ]
-
-                { SelectedProfile = Some(profileName profile)
-                  Checks = checks }
+        { SelectedProfile = IntentAdmission.resolveProviderProfileName restricted
+          Checks =
+            [ yield! IntentAdmission.providerFailedWitness restricted |> Option.bind failedWitnessIssue |> Option.toList
+              if IntentAdmission.tmFailedWitness restricted |> Option.isNone && IntentAdmission.resolveProviderProfileName restricted |> Option.isNone then
+                  yield issue "PROVIDER_PROFILE" "The normalized target does not resolve to a supported provider profile." ]
+            |> List.distinctBy (fun value -> value.Code, value.Message) }
 
     let private tmFailedWitness (intent: DemoTmIntent) =
-        let measurableMissing =
-            intent.Venue.IsNone
-            || intent.ServiceClass.IsNone
-            || intent.EventDate.IsNone
-            || intent.StartHour.IsNone
-            || intent.EndHour.IsNone
-            || intent.Timezone.IsNone
-            || intent.DeviceCount.IsNone
-            || intent.MaxUplinkLatencyMs.IsNone
-            || intent.ReportingIntervalMinutes.IsNone
-
-        if measurableMissing then
-            Some "measurable_intent"
-        else
-            match intent.StartHour, intent.EndHour with
-            | Some startHour, Some endHour when startHour >= endHour -> Some "window_checked_intent"
-            | _ when not intent.ImmediateDegradationAlerts -> Some "tm_checked_intent"
-            | _ -> None
+        restrictedFromDemoIntent intent |> IntentAdmission.tmFailedWitness
 
     let private providerFailedWitness (intent: DemoTmIntent) =
-        match tmFailedWitness intent with
-        | Some _ -> None
-        | None ->
-            match profileFromIntent intent with
-            | None -> Some "profiled_intent"
-            | Some profile ->
-                let capacityStageFails =
-                    not (providerWindowOk intent)
-                    || not (reportingOk intent)
-                    ||
-                       match intent.DeviceCount with
-                       | Some devices -> devices > maxDevices profile
-                       | None -> true
-
-                let latencyStageFails =
-                    match intent.MaxUplinkLatencyMs with
-                    | Some latency -> latency < minLatencyBound profile
-                    | None -> true
-
-                if capacityStageFails then
-                    Some "capacity_checked_intent"
-                else if latencyStageFails then
-                    Some "latency_checked_intent"
-                else if intent.RequestsPublicSafetyPreemption || not intent.PreserveEmergencyTraffic then
-                    Some "policy_checked_intent"
-                else
-                    None
+        restrictedFromDemoIntent intent |> IntentAdmission.providerFailedWitness
 
     let private demoProjectDir () =
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."))
 
-    let private demoSchemaPath () =
-        Path.Combine(demoProjectDir (), "DemoSchemas", "BroadcastIntent.schema.json")
+    let private demoSchemaPath family =
+        let fileName =
+            match family with
+            | Some "CriticalService" -> "CriticalServiceIntent.schema.json"
+            | _ -> "BroadcastIntent.schema.json"
+
+        Path.Combine(demoProjectDir (), "DemoSchemas", fileName)
 
     let private fstarDemoDir () =
         Path.Combine(demoProjectDir (), "FStarDemo")
 
+    let private fstarLibraryDir () =
+        Path.Combine(demoProjectDir (), "FStar")
+
     let private fstarGeneratedDemoDir () =
         Path.Combine(fstarDemoDir (), "generated")
 
-    let private jsonBaselineSchema =
-        lazy
-            let schemaText = File.ReadAllText(demoSchemaPath ())
-            Json.Schema.JsonSchema.FromText(schemaText)
+    let private jsonBaselineSchemas =
+        System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Json.Schema.JsonSchema>>()
+
+    let private jsonBaselineSchema family =
+        let key = family |> Option.defaultValue "Broadcast"
+
+        jsonBaselineSchemas.GetOrAdd(
+            key,
+            fun _ ->
+                lazy
+                    let schemaText = File.ReadAllText(demoSchemaPath family)
+                    Json.Schema.JsonSchema.FromText(schemaText)
+        )
 
     let private buildJsonBaselineInstance (intent: DemoTmIntent) =
-        JsonSerializer.SerializeToElement(
-            {| intentName = intent.IntentName
-               venue = intent.Venue
-               serviceClass = intent.ServiceClass
-               eventDate =
-                intent.EventDate
-                |> Option.map (fun value -> value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
-               startHour = intent.StartHour
-               endHour = intent.EndHour
-               timezone = intent.Timezone
-               deviceCount = intent.DeviceCount
-               maxUplinkLatencyMs = intent.MaxUplinkLatencyMs
-               reportingIntervalMinutes = intent.ReportingIntervalMinutes
-               immediateDegradationAlerts = intent.ImmediateDegradationAlerts
-               preserveEmergencyTraffic = intent.PreserveEmergencyTraffic
-               requestsPublicSafetyPreemption = intent.RequestsPublicSafetyPreemption |},
-            serializerOptions)
+        let eventDate =
+            intent.EventDate
+            |> Option.map (fun value -> value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+
+        match intent.ScenarioFamily with
+        | Some "CriticalService" ->
+            JsonSerializer.SerializeToElement(
+                {| intentName = intent.IntentName
+                   facility = intent.TargetName
+                   serviceClass = intent.ServiceClass
+                   eventDate = eventDate
+                   startHour = intent.StartHour
+                   endHour = intent.EndHour
+                   timezone = intent.Timezone
+                   criticalDeviceCount = intent.PrimaryDeviceCount |> optionOr intent.DeviceCount
+                   auxiliaryEndpointCount = intent.AuxiliaryEndpointCount
+                   maxEndToEndLatencyMs = intent.MaxLatencyMs |> optionOr intent.MaxUplinkLatencyMs
+                   reportingIntervalMinutes = intent.ReportingIntervalMinutes
+                   immediateDegradationAlerts = intent.ImmediateDegradationAlerts
+                   safetyPolicyDeclared = intent.SafetyPolicyDeclared
+                   preserveEmergencyTraffic = intent.PreserveEmergencyTraffic
+                   requestsPublicSafetyPreemption = intent.RequestsPublicSafetyPreemption |},
+                serializerOptions)
+        | _ ->
+            JsonSerializer.SerializeToElement(
+                {| intentName = intent.IntentName
+                   venue = intent.TargetName |> optionOr intent.Venue
+                   serviceClass = intent.ServiceClass
+                   eventDate = eventDate
+                   startHour = intent.StartHour
+                   endHour = intent.EndHour
+                   timezone = intent.Timezone
+                   deviceCount = intent.PrimaryDeviceCount |> optionOr intent.DeviceCount
+                   maxUplinkLatencyMs = intent.MaxLatencyMs |> optionOr intent.MaxUplinkLatencyMs
+                   reportingIntervalMinutes = intent.ReportingIntervalMinutes
+                   immediateDegradationAlerts = intent.ImmediateDegradationAlerts
+                   preserveEmergencyTraffic = intent.PreserveEmergencyTraffic
+                   requestsPublicSafetyPreemption = intent.RequestsPublicSafetyPreemption |},
+                serializerOptions)
 
     let rec private collectJsonSchemaIssues (element: JsonElement) =
         let nested =
@@ -683,12 +804,14 @@ module DemoScenarios =
 
         local @ nested
 
-    let private validateJsonBaseline intent =
+    let private validateJsonBaseline (intent: DemoTmIntent) =
         let options = Json.Schema.EvaluationOptions()
         options.OutputFormat <- Json.Schema.OutputFormat.List
         options.RequireFormatValidation <- true
 
-        let result = jsonBaselineSchema.Value.Evaluate(buildJsonBaselineInstance intent, options)
+        let result =
+            jsonBaselineSchema (intent.ScenarioFamily)
+            |> fun schema -> schema.Value.Evaluate(buildJsonBaselineInstance intent, options)
         let resultJson = JsonSerializer.SerializeToElement(result.ToList())
 
         let issues =
@@ -746,8 +869,9 @@ module DemoScenarios =
 
     let private runFStarCase fileName expectedSuccess =
         let baseDir = fstarDemoDir ()
+        let libraryDir = fstarLibraryDir ()
         let filePath = Path.Combine(baseDir, fileName)
-        let arguments = $"--include \"{baseDir}\" \"{filePath}\""
+        let arguments = $"--include \"{baseDir}\" --include \"{libraryDir}\" \"{filePath}\""
         let exitCode, stdout, stderr = runProcess "fstar.exe" arguments
 
         { FileName = fileName
@@ -828,11 +952,11 @@ let selected_profile : profile =
 let measurable : measurable_intent {intentBindingName} =
   mk_measurable {intentBindingName}
 
+let quantity_checked : quantity_checked_intent {intentBindingName} =
+  mk_quantity_checked {intentBindingName}
+
 let window_checked : window_checked_intent {intentBindingName} =
   mk_window_checked {intentBindingName}
-
-let tm_checked : tm_checked_intent {intentBindingName} =
-  mk_tm_checked {intentBindingName}
 
 let profiled : profiled_intent selected_profile {intentBindingName} =
   mk_profiled selected_profile {intentBindingName}
@@ -888,66 +1012,80 @@ let admission_token_for_demo : admission_token selected_profile =
 
         let tmStages =
             [ match tmFailure with
+              | Some "candidate_module_compile" ->
+                  stage "Candidate module compile" "candidate_module_compile" "failed" "The generated candidate module did not type-check in F*."
+                  stage "TR292 measurability" "measurable_intent" "skipped" "Common-core witnesses cannot be composed until the candidate module compiles."
+                  stage "Quantity sanity" "quantity_checked_intent" "skipped" "Quantity refinement depends on a compiled candidate module."
               | Some "measurable_intent" ->
-                  stage "TM measurability" "measurable_intent" "failed" "Required measurable fields are still missing."
-                  stage "Window sanity" "window_checked_intent" "skipped" "Window checking never ran because measurability failed."
-                  stage "TM witness" "tm_checked_intent" "skipped" "TM witness construction depends on the earlier stages."
-              | Some "window_checked_intent" ->
-                  stage "TM measurability" "measurable_intent" "passed" "All measurable fields are present."
-                  stage "Window sanity" "window_checked_intent" "failed" "The stated time window is not strictly increasing."
-                  stage "TM witness" "tm_checked_intent" "skipped" "TM witness construction stops at the invalid window."
-              | Some "tm_checked_intent" ->
-                  stage "TM measurability" "measurable_intent" "passed" "All measurable fields are present."
-                  stage "Window sanity" "window_checked_intent" "passed" "The time window is structurally usable."
-                  stage "TM witness" "tm_checked_intent" "failed" "TM intent obligations are incomplete."
+                  stage "Candidate module compile" "candidate_module_compile" "passed" "The generated candidate module type-checks in F*."
+                  stage "TR292 measurability" "measurable_intent" "failed" "Required common-core fields are still missing."
+                  stage "Quantity sanity" "quantity_checked_intent" "skipped" "Quantity refinement depends on measurable common-core fields."
+              | Some "quantity_checked_intent" ->
+                  stage "Candidate module compile" "candidate_module_compile" "passed" "The generated candidate module type-checks in F*."
+                  stage "TR292 measurability" "measurable_intent" "passed" "All common-core measurable fields are present."
+                  stage "Quantity sanity" "quantity_checked_intent" "failed" "One or more measured quantities are missing or non-positive."
               | _ ->
-                  stage "TM measurability" "measurable_intent" "passed" "All measurable fields are present."
-                  stage "Window sanity" "window_checked_intent" "passed" "The time window is structurally usable."
-                  stage "TM witness" "tm_checked_intent" "passed" "A TM-level witness can be constructed." ]
+                  stage "Candidate module compile" "candidate_module_compile" "passed" "The generated candidate module type-checks in F*."
+                  stage "TR292 measurability" "measurable_intent" "passed" "All common-core measurable fields are present."
+                  stage "Quantity sanity" "quantity_checked_intent" "passed" "The intent satisfies the TR292/common-core quantity checks." ]
 
         let providerStages =
             if providerSkipped then
-                [ stage "Profile resolution" "profiled_intent" "skipped" "Provider reasoning is skipped until the TM witness exists."
-                  stage "Capacity and operating envelope" "capacity_checked_intent" "skipped" "Provider constraints depend on a TM witness."
+                [ stage "Window sanity" "window_checked_intent" "skipped" "Provider refinement is skipped until the TR292/common-core witness exists."
+                  stage "Profile resolution" "profiled_intent" "skipped" "Provider reasoning is skipped until the TR292/common-core witness exists."
+                  stage "Capacity and operating envelope" "capacity_checked_intent" "skipped" "Provider constraints depend on a common-core witness."
                   stage "Latency floor" "latency_checked_intent" "skipped" "Latency refinement depends on earlier provider stages."
-                  stage "Safety policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
+                  stage "Safety and traffic policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
                   stage "Provider admission" "provider_checked_intent" "skipped" "Provider admission is not attempted."
                   stage "Admission token" "admission_token" "skipped" "No downstream token can be issued." ]
             else
                 [ match providerFailure with
+                  | Some "window_checked_intent" ->
+                      stage "Window sanity" "window_checked_intent" "failed" "The requested service window is not strictly increasing."
+                      stage "Profile resolution" "profiled_intent" "skipped" "Profile resolution depends on a valid service window."
+                      stage "Capacity and operating envelope" "capacity_checked_intent" "skipped" "Capacity checking depends on the provider window stage."
+                      stage "Latency floor" "latency_checked_intent" "skipped" "Latency refinement depends on earlier provider stages."
+                      stage "Safety and traffic policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
+                      stage "Provider admission" "provider_checked_intent" "skipped" "Provider admission stops at window refinement."
+                      stage "Admission token" "admission_token" "skipped" "No downstream token can be issued."
                   | Some "profiled_intent" ->
+                      stage "Window sanity" "window_checked_intent" "passed" "The requested service window is semantically valid."
                       stage "Profile resolution" "profiled_intent" "failed" "The normalized venue does not map to a supported provider profile."
                       stage "Capacity and operating envelope" "capacity_checked_intent" "skipped" "Capacity checking depends on a resolved provider profile."
                       stage "Latency floor" "latency_checked_intent" "skipped" "Latency refinement depends on earlier provider stages."
-                      stage "Safety policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
+                      stage "Safety and traffic policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
                       stage "Provider admission" "provider_checked_intent" "skipped" "Provider admission stops at profile resolution."
                       stage "Admission token" "admission_token" "skipped" "No downstream token can be issued."
                   | Some "capacity_checked_intent" ->
+                      stage "Window sanity" "window_checked_intent" "passed" "The requested service window is semantically valid."
                       stage "Profile resolution" "profiled_intent" "passed" "A concrete provider profile has been resolved."
                       stage "Capacity and operating envelope" "capacity_checked_intent" "failed" "Capacity, reporting, or provider operating-window constraints were violated."
                       stage "Latency floor" "latency_checked_intent" "skipped" "Latency refinement depends on the capacity stage."
-                      stage "Safety policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
+                      stage "Safety and traffic policy" "policy_checked_intent" "skipped" "Policy refinement depends on earlier provider stages."
                       stage "Provider admission" "provider_checked_intent" "skipped" "Provider admission stops at the capacity stage."
                       stage "Admission token" "admission_token" "skipped" "No downstream token can be issued."
                   | Some "latency_checked_intent" ->
+                      stage "Window sanity" "window_checked_intent" "passed" "The requested service window is semantically valid."
                       stage "Profile resolution" "profiled_intent" "passed" "A concrete provider profile has been resolved."
                       stage "Capacity and operating envelope" "capacity_checked_intent" "passed" "Capacity, reporting, and operating-window checks passed."
                       stage "Latency floor" "latency_checked_intent" "failed" "The request undercuts the profile-specific latency floor."
-                      stage "Safety policy" "policy_checked_intent" "skipped" "Policy refinement depends on the latency stage."
+                      stage "Safety and traffic policy" "policy_checked_intent" "skipped" "Policy refinement depends on the latency stage."
                       stage "Provider admission" "provider_checked_intent" "skipped" "Provider admission stops at the latency stage."
                       stage "Admission token" "admission_token" "skipped" "No downstream token can be issued."
                   | Some "policy_checked_intent" ->
+                      stage "Window sanity" "window_checked_intent" "passed" "The requested service window is semantically valid."
                       stage "Profile resolution" "profiled_intent" "passed" "A concrete provider profile has been resolved."
                       stage "Capacity and operating envelope" "capacity_checked_intent" "passed" "Capacity, reporting, and operating-window checks passed."
                       stage "Latency floor" "latency_checked_intent" "passed" "The request satisfies the profile-specific latency floor."
-                      stage "Safety policy" "policy_checked_intent" "failed" "Protected-traffic and emergency-traffic constraints were violated."
+                      stage "Safety and traffic policy" "policy_checked_intent" "failed" "Alerting, safety-declaration, or protected-traffic constraints were violated."
                       stage "Provider admission" "provider_checked_intent" "skipped" "Provider admission stops at the policy stage."
                       stage "Admission token" "admission_token" "skipped" "No downstream token can be issued."
                   | _ when providerAccepted ->
+                      stage "Window sanity" "window_checked_intent" "passed" "The requested service window is semantically valid."
                       stage "Profile resolution" "profiled_intent" "passed" "A concrete provider profile has been resolved."
                       stage "Capacity and operating envelope" "capacity_checked_intent" "passed" "Capacity, reporting, and operating-window checks passed."
                       stage "Latency floor" "latency_checked_intent" "passed" "The request satisfies the profile-specific latency floor."
-                      stage "Safety policy" "policy_checked_intent" "passed" "The request preserves protected traffic."
+                      stage "Safety and traffic policy" "policy_checked_intent" "passed" "The request satisfies alerting, safety, and protected-traffic policy."
                       stage "Provider admission" "provider_checked_intent" "passed" "A provider-level witness has been constructed."
                       stage "Admission token" "admission_token" "passed" "A downstream typed admission token is now constructible."
                   | _ ->
@@ -957,10 +1095,11 @@ let admission_token_for_demo : admission_token selected_profile =
                           else
                               "F* rejected the request at provider admission."
 
+                      stage "Window sanity" "window_checked_intent" "passed" "The requested service window is semantically valid."
                       stage "Profile resolution" "profiled_intent" "passed" "A concrete provider profile has been resolved."
                       stage "Capacity and operating envelope" "capacity_checked_intent" "passed" "Capacity, reporting, and operating-window checks passed."
                       stage "Latency floor" "latency_checked_intent" "passed" "The request satisfies the profile-specific latency floor."
-                      stage "Safety policy" "policy_checked_intent" "passed" "The request preserves protected traffic."
+                      stage "Safety and traffic policy" "policy_checked_intent" "passed" "The request satisfies alerting, safety, and protected-traffic policy."
                       stage "Provider admission" "provider_checked_intent" "failed" providerSummary
                       stage "Admission token" "admission_token" "skipped" "No downstream token can be issued." ]
 
@@ -982,7 +1121,7 @@ let admission_token_for_demo : admission_token selected_profile =
             if not jsonBaseline.Accepted then
                 "Even a schema-only baseline rejects this request because the normalized shape is still incomplete."
             else if not dependentTm.Accepted then
-                "The JSON shape passes, but the TM witness cannot be composed because business-level intent requirements are still unmet."
+                "The JSON shape passes, but the TR292/common-core witness cannot be composed because required common-core semantics are still unmet."
             else
                 match dependentProvider.Accepted with
                 | Some true ->
@@ -993,7 +1132,7 @@ let admission_token_for_demo : admission_token selected_profile =
 
                     $"The JSON shape passes, but the provider witness chain breaks at {failedWitness}, which exposes domain semantics beyond schema validation."
                 | None ->
-                    "Provider reasoning stays dormant until the TM witness exists."
+                    "Provider reasoning stays dormant until the TR292/common-core witness exists."
 
     let private expectationChecks
         (definition: DemoScenarioDefinition)
@@ -1042,6 +1181,7 @@ let admission_token_for_demo : admission_token selected_profile =
 
     let private adHocDefinition text =
         { Id = "ad_hoc"
+          ScenarioFamily = IntentAdmission.LiveBroadcast
           Title = "Ad Hoc Statement"
           Kicker = "Interactive"
           Text = text
@@ -1050,6 +1190,7 @@ let admission_token_for_demo : admission_token selected_profile =
           ExpectedJsonAccepted = false
           ExpectedFailedWitness = None
           Story = ""
+          ReferenceIntent = None
           FStarFile = None
           FStarExpectedSuccess = None }
 
@@ -1081,69 +1222,101 @@ let admission_token_for_demo : admission_token selected_profile =
         let definition =
             definitionOption |> Option.defaultWith (fun () -> adHocDefinition text)
 
-        let normalizedIntent = record.CanonicalIntent |> Option.map (canonicalToDemoIntent text)
-        let workingIntent = normalizedIntent |> Option.defaultValue (emptyDemoIntent text)
+        let tmStageWitnesses =
+            set [ "candidate_module_compile"; "measurable_intent"; "quantity_checked_intent" ]
+
+        let normalizedIntent =
+            record.OperationalIntent
+            |> Option.bind (demoIntentFromOperational text)
+            |> Option.orElseWith (fun () -> record.CanonicalIntent |> Option.map (canonicalToDemoIntent text))
+
+        let referenceIntent =
+            definition.ReferenceIntent |> Option.map (demoIntentFromRestricted definition.Text)
+
+        let workingIntent =
+            normalizedIntent
+            |> Option.orElse referenceIntent
+            |> Option.defaultValue (emptyDemoIntent text)
+
         let jsonBaseline = validateJsonBaseline workingIntent
 
+        let tmFailedWitness =
+            match record.FirstFailedWitness with
+            | Some witness when tmStageWitnesses.Contains witness -> Some witness
+            | _ when record.TmWitnessStatus = Some "failed" -> record.FirstFailedWitness
+            | _ -> None
+
+        let providerFailedWitness =
+            match record.FirstFailedWitness with
+            | Some witness when not (tmStageWitnesses.Contains witness) -> Some witness
+            | _ when record.ProviderWitnessStatus = Some "failed" -> record.FirstFailedWitness
+            | _ -> None
+
+        let tmAccepted = record.TmWitnessStatus = Some "passed"
+        let providerAccepted =
+            match record.ProviderWitnessStatus with
+            | Some "passed" -> Some true
+            | Some "failed" -> Some false
+            | _ -> None
+
+        let providerGeneratedModule =
+            record.Artifacts |> Option.bind (fun artifacts -> readArtifactText artifacts.ProviderWitnessModule)
+
+        let providerCheckerExcerpt =
+            record.Artifacts
+            |> Option.bind (fun artifacts ->
+                artifacts.ProviderWitnessCheck
+                |> Option.bind (fun reference -> checkerExcerptFromPath reference.Path))
+
         let tmIssues =
-            [ match normalizedIntent with
-              | Some intent -> yield! validateTmIntent intent
-              | None ->
+            [ match normalizedIntent, definition.ReferenceIntent with
+              | None, None ->
                   yield
                       issue
                           "TM_NO_NORMALIZED_INTENT"
-                          "The live LLM pipeline did not produce a broadcast-domain normalized intent."
+                          "The live LLM pipeline did not produce an operational intent in the supported admission subset."
+              | _ -> ()
+              yield! tmFailedWitness |> Option.bind failedWitnessIssue |> Option.toList
               yield! issuesFromDiagnostics record.Diagnostics ]
             |> distinctIssues
 
-        let dependentTmWitnessFailure =
-            match normalizedIntent with
-            | Some intent -> tmFailedWitness intent
-            | None -> Some "measurable_intent"
-
         let dependentTm =
-            { Accepted = dependentTmWitnessFailure.IsNone
+            { Accepted = tmAccepted
               Issues = tmIssues
-              FailedWitness = dependentTmWitnessFailure }
+              FailedWitness = tmFailedWitness }
+
+        let providerIssues =
+            [ yield! providerFailedWitness |> Option.bind failedWitnessIssue |> Option.toList
+              if tmAccepted && providerAccepted.IsNone then
+                  yield issue "PROVIDER_NOT_RUN" "Provider witness construction was not completed."
+              yield!
+                if tmAccepted then
+                    issuesFromDiagnostics record.Diagnostics
+                else
+                    [] ]
+            |> distinctIssues
 
         let providerDecision =
-            if dependentTm.Accepted then
-                Some(validateProviderIntent workingIntent)
+            if dependentTm.Accepted || record.SelectedProfile.IsSome then
+                Some
+                    { SelectedProfile =
+                        record.SelectedProfile
+                        |> Option.orElseWith (fun () -> IntentAdmission.resolveProviderProfileName (restrictedFromDemoIntent workingIntent))
+                      Checks = providerIssues }
             else
                 None
 
-        let generatedProvider =
-            normalizedIntent |> Option.map (fun _ -> runGeneratedProviderFStar moduleKey workingIntent)
-
-        let providerWitnessFailure =
-            if dependentTm.Accepted then providerFailedWitness workingIntent else None
-
-        let dependentProviderAccepted =
-            match dependentTm.Accepted, generatedProvider with
-            | true, Some generated -> Some generated.ActualSuccess
-            | _ -> None
-
-        let mismatchIssues =
-            match dependentProviderAccepted with
-            | Some accepted when accepted <> providerWitnessFailure.IsNone ->
-                [ issue
-                      "DEPENDENT_PROVIDER_MISMATCH"
-                      "The provider F* checker disagreed with the explainer path about provider admission. Inspect the checker excerpt in the audit details." ]
-            | _ -> []
-
-        let dependentProviderIssues =
-            [ yield! providerDecision |> Option.map (fun decision -> decision.Checks) |> Option.defaultValue []
-              yield! mismatchIssues ]
-            |> distinctIssues
-
         let dependentProvider =
-            { Accepted = dependentProviderAccepted
+            { Accepted = if dependentTm.Accepted then providerAccepted else None
               SelectedProfile = providerDecision |> Option.bind (fun decision -> decision.SelectedProfile)
-              Issues = dependentProviderIssues
-              FailedWitness = if dependentTm.Accepted then providerWitnessFailure else None
-              CheckerExcerpt = generatedProvider |> Option.bind (fun result -> excerpt result.Output)
-              GeneratedModule = generatedProvider |> Option.map (fun result -> result.GeneratedModule)
-              AdmissionTokenType = generatedProvider |> Option.bind (fun result -> result.AdmissionTokenType) }
+              Issues = providerIssues
+              FailedWitness = if dependentTm.Accepted then providerFailedWitness else None
+              CheckerExcerpt = providerCheckerExcerpt
+              GeneratedModule = providerGeneratedModule
+              AdmissionTokenType =
+                match record.AdmissionOutcome, record.SelectedProfile with
+                | Some "provider_admitted", Some profile -> Some $"admission_token {profile}"
+                | _ -> None }
 
         let finalOutcome =
             if not dependentTm.Accepted then
@@ -1181,7 +1354,7 @@ let admission_token_for_demo : admission_token selected_profile =
           DependentTm = dependentTm
           DependentProvider = dependentProvider
           ConstraintTrace =
-            buildConstraintTrace workingIntent jsonBaseline dependentTm dependentProvider (providerWitnessFailure.IsNone)
+            buildConstraintTrace workingIntent jsonBaseline dependentTm dependentProvider dependentProvider.FailedWitness.IsNone
           Story = story
           ExpectedJsonAccepted =
             definitionOption |> Option.map (fun scenario -> scenario.ExpectedJsonAccepted) |> Option.defaultValue jsonBaseline.Accepted
@@ -1191,8 +1364,51 @@ let admission_token_for_demo : admission_token selected_profile =
             |> Option.orElse (dependentTm.FailedWitness |> Option.orElse dependentProvider.FailedWitness)
           ExpectationChecks = checks }
 
+    let private referenceDate = DateOnly(2026, 4, 25)
+
+    let private broadcastReference targetName : IntentAdmission.RestrictedIntent =
+        { IntentName = "LiveBroadcastIntent"
+          ScenarioFamily = IntentAdmission.LiveBroadcast
+          TargetName = Some targetName
+          TargetKind = Some IntentAdmission.VenueTarget
+          ServiceClass = Some "premium-5g-broadcast"
+          EventDate = Some referenceDate
+          StartHour = Some 18
+          EndHour = Some 22
+          Timezone = Some "America/Detroit"
+          PrimaryDeviceCount = Some 200
+          AuxiliaryEndpointCount = None
+          MaxLatencyMs = Some 20
+          ReportingIntervalMinutes = Some 60
+          ImmediateDegradationAlerts = true
+          SafetyPolicyDeclared = true
+          PreserveEmergencyTraffic = true
+          RequestPublicSafetyPreemption = false
+          SourceText = None }
+
+    let private criticalReference targetName : IntentAdmission.RestrictedIntent =
+        { IntentName = "CriticalServiceIntent"
+          ScenarioFamily = IntentAdmission.CriticalService
+          TargetName = Some targetName
+          TargetKind = Some IntentAdmission.FacilityTarget
+          ServiceClass = Some "ultra-reliable-5g-clinical"
+          EventDate = Some referenceDate
+          StartHour = Some 8
+          EndHour = Some 20
+          Timezone = Some "America/Detroit"
+          PrimaryDeviceCount = Some 80
+          AuxiliaryEndpointCount = Some 200
+          MaxLatencyMs = Some 10
+          ReportingIntervalMinutes = Some 5
+          ImmediateDegradationAlerts = true
+          SafetyPolicyDeclared = true
+          PreserveEmergencyTraffic = true
+          RequestPublicSafetyPreemption = false
+          SourceText = None }
+
     let scenarios =
         [ { Id = "broadcast_success_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Accepted Broadcast"
             Kicker = "Scenario 1"
             Text =
@@ -1203,22 +1419,30 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = None
             Story =
               "This is the full success path: the JSON shape passes, every witness composes, and the demo can construct a typed admission token rather than stopping at pass/fail validation."
+            ReferenceIntent = Some(broadcastReference "Detroit Stadium")
             FStarFile = Some "BroadcastProviderDemo.Success.fst"
             FStarExpectedSuccess = Some true }
           { Id = "broadcast_fail_window_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Window Witness Failure"
             Kicker = "Scenario 2"
             Text =
               "Provide a premium 5G broadcast service for the live event at Detroit Stadium on April 25, 2026 from 22:00 to 18:00 America/Detroit. Support up to 200 production devices. Keep uplink latency under 20 ms. Send hourly compliance updates and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
-            ExpectedOutcome = DemoRejectTm
-            ExpectedMessage = "JSON shape passes, but the TM window witness cannot be constructed."
+            ExpectedOutcome = DemoRejectProvider
+            ExpectedMessage = "JSON shape passes and the common-core witness succeeds, but provider window refinement fails."
             ExpectedJsonAccepted = true
             ExpectedFailedWitness = Some "window_checked_intent"
             Story =
-              "This case is structurally complete enough for JSON validation, yet the dependent TM model still rejects it because the time window is semantically impossible."
+              "This case is structurally complete enough for JSON validation and TR292/common-core validation, yet provider refinement still rejects it because the time window is semantically impossible."
+            ReferenceIntent =
+              Some
+                { broadcastReference "Detroit Stadium" with
+                    StartHour = Some 22
+                    EndHour = Some 18 }
             FStarFile = Some "BroadcastProviderDemo.FailWindow.fst"
             FStarExpectedSuccess = Some false }
           { Id = "broadcast_fail_capacity_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Capacity Witness Failure"
             Kicker = "Scenario 3"
             Text =
@@ -1229,9 +1453,14 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = Some "capacity_checked_intent"
             Story =
               "A schema can confirm that deviceCount is an integer, but only the typed provider model can state that the selected venue profile cannot compose a capacity witness for 2000 devices."
+            ReferenceIntent =
+              Some
+                { broadcastReference "Detroit Stadium" with
+                    PrimaryDeviceCount = Some 2000 }
             FStarFile = Some "BroadcastProviderDemo.FailCapacity.fst"
             FStarExpectedSuccess = Some false }
           { Id = "broadcast_fail_latency_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Latency Witness Failure"
             Kicker = "Scenario 4"
             Text =
@@ -1242,9 +1471,14 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = Some "latency_checked_intent"
             Story =
               "The request is perfectly well-formed JSON, yet dependent types expose that the same shape cannot inhabit the latency witness required by the Gold venue profile."
+            ReferenceIntent =
+              Some
+                { broadcastReference "Detroit Stadium" with
+                    MaxLatencyMs = Some 5 }
             FStarFile = Some "BroadcastProviderDemo.FailLatency.fst"
             FStarExpectedSuccess = Some false }
           { Id = "broadcast_fail_policy_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Policy Witness Failure"
             Kicker = "Scenario 5"
             Text =
@@ -1255,9 +1489,15 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = Some "policy_checked_intent"
             Story =
               "The schema baseline has no notion of protected traffic. The dependent provider model makes that policy explicit, so the witness chain breaks before an admission token can exist."
+            ReferenceIntent =
+              Some
+                { broadcastReference "Detroit Stadium" with
+                    PreserveEmergencyTraffic = false
+                    RequestPublicSafetyPreemption = true }
             FStarFile = Some "BroadcastProviderDemo.FailPolicy.fst"
             FStarExpectedSuccess = Some false }
           { Id = "broadcast_profile_gold_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Gold Profile Accepts"
             Kicker = "Scenario 6"
             Text =
@@ -1268,9 +1508,15 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = None
             Story =
               "This request is admissible when the same JSON shape resolves to the Gold profile, which lets the demo show business semantics living in the typed profile, not in the raw JSON alone."
+            ReferenceIntent =
+              Some
+                { broadcastReference "Detroit Stadium" with
+                    PrimaryDeviceCount = Some 90
+                    MaxLatencyMs = Some 30 }
             FStarFile = Some "BroadcastProviderDemo.ProfileGold.fst"
             FStarExpectedSuccess = Some true }
           { Id = "broadcast_profile_silver_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Silver Profile Rejects Same Shape"
             Kicker = "Scenario 7"
             Text =
@@ -1281,9 +1527,15 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = Some "latency_checked_intent"
             Story =
               "Only the venue-to-profile mapping changes here. JSON validation still passes, but the Silver profile requires a looser latency floor, so the dependent witness chain rejects the same shape."
+            ReferenceIntent =
+              Some
+                { broadcastReference "Metro Arena" with
+                    PrimaryDeviceCount = Some 90
+                    MaxLatencyMs = Some 30 }
             FStarFile = Some "BroadcastProviderDemo.ProfileSilver.fst"
             FStarExpectedSuccess = Some false }
           { Id = "broadcast_fail_tm_01"
+            ScenarioFamily = IntentAdmission.LiveBroadcast
             Title = "Shape-Level Failure"
             Kicker = "Scenario 8"
             Text = "Make the event network really good and fast for the broadcast."
@@ -1293,18 +1545,164 @@ let admission_token_for_demo : admission_token selected_profile =
             ExpectedFailedWitness = Some "measurable_intent"
             Story =
               "This is the easy case for a schema baseline: the request never becomes a measurable normalized object, so both JSON shape checks and dependent witnesses stop immediately."
+            ReferenceIntent =
+              Some
+                { IntentName = "LiveBroadcastIntent"
+                  ScenarioFamily = IntentAdmission.LiveBroadcast
+                  TargetName = None
+                  TargetKind = None
+                  ServiceClass = None
+                  EventDate = None
+                  StartHour = None
+                  EndHour = None
+                  Timezone = None
+                  PrimaryDeviceCount = None
+                  AuxiliaryEndpointCount = None
+                  MaxLatencyMs = None
+                  ReportingIntervalMinutes = None
+                  ImmediateDegradationAlerts = false
+                  SafetyPolicyDeclared = false
+                  PreserveEmergencyTraffic = false
+                  RequestPublicSafetyPreemption = false
+                  SourceText = None }
             FStarFile = Some "BroadcastProviderDemo.FailTm.fst"
+            FStarExpectedSuccess = Some false }
+          { Id = "critical_success_01"
+            ScenarioFamily = IntentAdmission.CriticalService
+            Title = "Accepted Critical Service"
+            Kicker = "Scenario 9"
+            Text =
+              "Provide an ultra-reliable 5G clinical service for telemedicine and critical care operations at Mayo Clinic on April 25, 2026 from 08:00 to 20:00 America/Detroit. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms. Send compliance updates every 5 minutes and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
+            ExpectedOutcome = DemoAccept
+            ExpectedMessage = "Accepted with CriticalCareAssured and a downstream admission token."
+            ExpectedJsonAccepted = true
+            ExpectedFailedWitness = None
+            Story =
+              "This is the critical-service success path: the request is specific enough for the TR292/common-core witnesses and still fits the assured clinical provider envelope."
+            ReferenceIntent = Some(criticalReference "Mayo Clinic")
+            FStarFile = Some "CriticalServiceDemo.Success.fst"
+            FStarExpectedSuccess = Some true }
+          { Id = "critical_fail_capacity_01"
+            ScenarioFamily = IntentAdmission.CriticalService
+            Title = "Critical Capacity Failure"
+            Kicker = "Scenario 10"
+            Text =
+              "Provide an ultra-reliable 5G clinical service for telemedicine and critical care operations at Mayo Clinic on April 25, 2026 from 08:00 to 20:00 America/Detroit. Support up to 95 critical devices and 260 auxiliary endpoints. Maintain end-to-end latency below 10 ms. Send compliance updates every 5 minutes and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
+            ExpectedOutcome = DemoRejectProvider
+            ExpectedMessage = "JSON shape passes, but clinical provider capacity constraints fail."
+            ExpectedJsonAccepted = true
+            ExpectedFailedWitness = Some "capacity_checked_intent"
+            Story =
+              "The critical-service family also needs provider refinement: the assured clinical profile rejects overloads that still look structurally valid in JSON."
+            ReferenceIntent =
+              Some
+                { criticalReference "Mayo Clinic" with
+                    PrimaryDeviceCount = Some 95
+                    AuxiliaryEndpointCount = Some 260 }
+            FStarFile = Some "CriticalServiceDemo.FailCapacity.fst"
+            FStarExpectedSuccess = Some false }
+          { Id = "critical_fail_latency_01"
+            ScenarioFamily = IntentAdmission.CriticalService
+            Title = "Critical Latency Failure"
+            Kicker = "Scenario 11"
+            Text =
+              "Provide an ultra-reliable 5G clinical service for telemedicine and critical care operations at Mayo Clinic on April 25, 2026 from 08:00 to 20:00 America/Detroit. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 5 ms. Send compliance updates every 5 minutes and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
+            ExpectedOutcome = DemoRejectProvider
+            ExpectedMessage = "JSON shape passes, but the clinical latency-floor witness fails."
+            ExpectedJsonAccepted = true
+            ExpectedFailedWitness = Some "latency_checked_intent"
+            Story =
+              "This request is semantically precise, yet the assured provider profile still rejects it because the claimed latency undercuts the supported floor."
+            ReferenceIntent =
+              Some
+                { criticalReference "Mayo Clinic" with
+                    MaxLatencyMs = Some 5 }
+            FStarFile = Some "CriticalServiceDemo.FailLatency.fst"
+            FStarExpectedSuccess = Some false }
+          { Id = "critical_fail_policy_01"
+            ScenarioFamily = IntentAdmission.CriticalService
+            Title = "Critical Policy Failure"
+            Kicker = "Scenario 12"
+            Text =
+              "Provide an ultra-reliable 5G clinical service for telemedicine and critical care operations at Mayo Clinic on April 25, 2026 from 08:00 to 20:00 America/Detroit. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms. Send compliance updates every 5 minutes and immediate alerts if service quality degrades. If needed, preempt reserved public-safety capacity to maintain service."
+            ExpectedOutcome = DemoRejectProvider
+            ExpectedMessage = "JSON shape passes, but the critical-service policy witness fails."
+            ExpectedJsonAccepted = true
+            ExpectedFailedWitness = Some "policy_checked_intent"
+            Story =
+              "The protected-traffic policy also matters in the critical-service family, so the witness chain still stops before provider admission."
+            ReferenceIntent =
+              Some
+                { criticalReference "Mayo Clinic" with
+                    PreserveEmergencyTraffic = false
+                    RequestPublicSafetyPreemption = true }
+            FStarFile = Some "CriticalServiceDemo.FailPolicy.fst"
+            FStarExpectedSuccess = Some false }
+          { Id = "critical_profile_standard_01"
+            ScenarioFamily = IntentAdmission.CriticalService
+            Title = "Standard Clinical Profile Rejects Same Shape"
+            Kicker = "Scenario 13"
+            Text =
+              "Provide an ultra-reliable 5G clinical service for telemedicine and critical care operations at City General Hospital on April 25, 2026 from 08:00 to 20:00 America/Detroit. Support up to 55 critical devices and 110 auxiliary endpoints. Maintain end-to-end latency below 12 ms. Send compliance updates every 10 minutes and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
+            ExpectedOutcome = DemoRejectProvider
+            ExpectedMessage = "The same clinical shape fails once the provider profile changes."
+            ExpectedJsonAccepted = true
+            ExpectedFailedWitness = Some "latency_checked_intent"
+            Story =
+              "Only the facility-to-profile mapping changes here. The request is clinically well formed, but the standard provider profile cannot satisfy the tighter latency claim."
+            ReferenceIntent =
+              Some
+                { criticalReference "City General Hospital" with
+                    PrimaryDeviceCount = Some 55
+                    AuxiliaryEndpointCount = Some 110
+                    MaxLatencyMs = Some 12
+                    ReportingIntervalMinutes = Some 10 }
+            FStarFile = Some "CriticalServiceDemo.ProfileStandard.fst"
+            FStarExpectedSuccess = Some false }
+          { Id = "critical_fail_tm_01"
+            ScenarioFamily = IntentAdmission.CriticalService
+            Title = "Critical Shape-Level Failure"
+            Kicker = "Scenario 14"
+            Text = "Keep the telemedicine network ultra reliable for the hospital."
+            ExpectedOutcome = DemoRejectTm
+            ExpectedMessage = "The critical-service request is too underspecified for TR292/common-core admission."
+            ExpectedJsonAccepted = false
+            ExpectedFailedWitness = Some "measurable_intent"
+            Story =
+              "The clinical family fails early for the same reason as the vague broadcast case: there is no measurable target, window, or typed quantity to compose into a witness."
+            ReferenceIntent =
+              Some
+                { IntentName = "CriticalServiceIntent"
+                  ScenarioFamily = IntentAdmission.CriticalService
+                  TargetName = None
+                  TargetKind = None
+                  ServiceClass = None
+                  EventDate = None
+                  StartHour = None
+                  EndHour = None
+                  Timezone = None
+                  PrimaryDeviceCount = None
+                  AuxiliaryEndpointCount = None
+                  MaxLatencyMs = None
+                  ReportingIntervalMinutes = None
+                  ImmediateDegradationAlerts = false
+                  SafetyPolicyDeclared = false
+                  PreserveEmergencyTraffic = false
+                  RequestPublicSafetyPreemption = false
+                  SourceText = None }
+            FStarFile = Some "CriticalServiceDemo.FailTm.fst"
             FStarExpectedSuccess = Some false } ]
 
     let featuredScenarioIds =
         [ "broadcast_success_01"
-          "broadcast_fail_window_01"
           "broadcast_fail_capacity_01"
-          "broadcast_fail_latency_01"
           "broadcast_fail_policy_01"
-          "broadcast_profile_gold_01"
-          "broadcast_profile_silver_01"
-          "broadcast_fail_tm_01" ]
+          "broadcast_fail_tm_01"
+          "critical_success_01"
+          "critical_fail_capacity_01"
+          "critical_fail_policy_01"
+          "critical_profile_standard_01"
+          "critical_fail_tm_01" ]
 
     let tryFindScenario id =
         scenarios |> List.tryFind (fun scenario -> scenario.Id = id)
@@ -1318,6 +1716,18 @@ let admission_token_for_demo : admission_token selected_profile =
 
     let buildNaturalLanguageRequest (text: string) : IntentFvo =
         let expressionValue = JsonDocument.Parse(JsonSerializer.Serialize(text)).RootElement.Clone()
+        let contextText =
+            let lower = text.ToLowerInvariant()
+
+            if
+                lower.Contains("telemedicine")
+                || lower.Contains("clinical")
+                || lower.Contains("critical care")
+                || lower.Contains("hospital")
+            then
+                "Critical service assurance"
+            else
+                "Live broadcast service"
 
         { Name = "demoIntent"
           Expression =
@@ -1330,7 +1740,7 @@ let admission_token_for_demo : admission_token selected_profile =
           ValidFor = None
           IsBundle = None
           Priority = Some "1"
-          Context = Some "Live broadcast service"
+          Context = Some contextText
           Version = Some "1.0"
           IntentSpecification = None
           LifecycleStatus = Some "acknowledged"

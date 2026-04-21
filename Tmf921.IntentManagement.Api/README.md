@@ -80,3 +80,7 @@ The shell-processing record includes:
 - checker status and diagnostics
 - file paths and hashes for generated sidecar artifacts
 - the raw checked F* module when natural-language processing succeeded
+
+## Sequence Diagram
+
+See [Intent submission sequence](../docs/intent_submission_sequence.md) for the current create-path flow.

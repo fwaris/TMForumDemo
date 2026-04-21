@@ -1,5 +1,6 @@
 namespace Tmf921.IntentManagement.Api
 open System
+open System.IO
 open System.Text.Json
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Builder
@@ -22,6 +23,23 @@ module Program =
         match Single.TryParse value with
         | true, parsed -> Some parsed
         | _ -> None
+
+    let private tryGetArgValue (args: string array) (name: string) =
+        args
+        |> Array.tryFindIndex ((=) name)
+        |> Option.bind (fun index ->
+            if index + 1 < args.Length then
+                Some args[index + 1]
+            else
+                None)
+
+    let private tryGetLatestDirectory root =
+        if Directory.Exists root then
+            Directory.GetDirectories(root)
+            |> Array.sort
+            |> Array.tryLast
+        else
+            None
 
     let private resolveIntentLlmOptions (configuration: IConfiguration) =
         let defaults = IntentLlmDefaults.value
@@ -74,6 +92,33 @@ module Program =
 
             DemoScenarios.runAllAsync rawIntentGenerator
             |> fun task -> task.GetAwaiter().GetResult()
+            |> fun results -> JsonSerializer.Serialize(results, options)
+            |> Console.WriteLine
+            exitCode
+        else if args |> Array.exists (fun arg -> arg = "--run-benchmark-live") then
+            let options = JsonSerializerOptions(serializerOptions)
+            options.WriteIndented <- true
+            let outputDirectory = tryGetArgValue args "--benchmark-output-dir" |> Option.map Path.GetFullPath
+            let rawIntentGenerator =
+                RawIntentGenerator(createChatClient intentLlmOptions.Model openAiApiKey, intentLlmOptions)
+                :> IRawIntentGenerator
+
+            BenchmarkRunner.runLiveAsync rawIntentGenerator outputDirectory
+            |> fun task -> task.GetAwaiter().GetResult()
+            |> fun results -> JsonSerializer.Serialize(results, options)
+            |> Console.WriteLine
+            exitCode
+        else if args |> Array.exists (fun arg -> arg = "--run-benchmark-replay") then
+            let options = JsonSerializerOptions(serializerOptions)
+            options.WriteIndented <- true
+            let replayPath =
+                tryGetArgValue args "--run-benchmark-replay"
+                |> Option.orElseWith (fun () ->
+                    Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "DemoFixtures", "BenchmarkRuns")
+                    |> tryGetLatestDirectory)
+                |> Option.defaultValue (Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "DemoFixtures", "BenchmarkRuns"))
+
+            BenchmarkRunner.replay replayPath
             |> fun results -> JsonSerializer.Serialize(results, options)
             |> Console.WriteLine
             exitCode

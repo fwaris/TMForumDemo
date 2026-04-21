@@ -4,7 +4,6 @@ open System
 open System.IO
 open System.Text
 open System.Text.Json
-open System.Text.Json.Nodes
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.AI
@@ -19,17 +18,18 @@ type IntentLlmOptions =
 
 type RawIntentGenerationContext =
     { ScenarioId: string option
-      UseScenarioFixtures: bool }
+      UseScenarioFixtures: bool
+      RepairIssues: ProcessingDiagnostic list }
 
 type RawIntentGenerationResult =
-    { Envelope: RawIntentParseEnvelope option
+    { Envelope: FStarIntentModuleEnvelope option
       Metadata: LlmParseMetadata
       PromptText: string option
       RawResponseText: string option
       Diagnostics: ProcessingDiagnostic list }
 
 type IRawIntentGenerator =
-    abstract member GenerateSemanticCoreAsync:
+    abstract member GenerateIntentModuleAsync:
         context: RawIntentGenerationContext * text: string * cancellationToken: CancellationToken ->
             Task<RawIntentGenerationResult>
 
@@ -40,7 +40,7 @@ type ScenarioRawIntentFixture =
       PromptVersion: string
       PromptText: string
       ResponseText: string
-      Envelope: RawIntentParseEnvelope }
+      Envelope: FStarIntentModuleEnvelope }
 
 type SchemaValidationResult =
     { Accepted: bool
@@ -50,11 +50,13 @@ type SchemaValidationResult =
 module RawIntentGenerationContext =
     let Live =
         { ScenarioId = None
-          UseScenarioFixtures = false }
+          UseScenarioFixtures = false
+          RepairIssues = [] }
 
     let ForScenario scenarioId =
         { ScenarioId = Some scenarioId
-          UseScenarioFixtures = true }
+          UseScenarioFixtures = true
+          RepairIssues = [] }
 
 module IntentLlmDefaults =
     let value =
@@ -62,7 +64,7 @@ module IntentLlmDefaults =
           MaxAttempts = 3
           Temperature = 0.0f
           TimeoutSeconds = 30
-          UseScenarioFixtures = true }
+          UseScenarioFixtures = false }
 
 module RawIntentContracts =
     let private schemasDir () =
@@ -171,8 +173,113 @@ module RawIntentScenarioFixtures =
         File.WriteAllText(path, JsonSerializer.Serialize(fixture, serializerOptions), Encoding.UTF8)
         path
 
+module RawIntentGenerationValidation =
+    type SimulatedAttemptSequenceResult =
+        { Envelope: FStarIntentModuleEnvelope option
+          SelectedOutcome: string
+          Attempts: LlmParseAttempt list
+          Diagnostics: ProcessingDiagnostic list }
+
+    let private diagnostic code message details =
+        { Code = code
+          Message = message
+          Details = details }
+
+    let private normalizeOptionalString (value: string option) =
+        value
+        |> Option.bind (fun text ->
+            let trimmed = text.Trim()
+            if String.IsNullOrWhiteSpace trimmed then None else Some trimmed)
+
+    let normalizeEnvelope (envelope: FStarIntentModuleEnvelope) =
+        { Status =
+            if isNull envelope.Status then
+                ""
+            else
+                envelope.Status.Trim().ToLowerInvariant()
+          ModuleText =
+            envelope.ModuleText
+            |> normalizeOptionalString
+            |> Option.map (fun value -> value.Replace("\r\n", "\n"))
+          Issues =
+            (if isNull (box envelope.Issues) then [] else envelope.Issues)
+            |> List.map (fun issue ->
+                { issue with
+                    Code = issue.Code.Trim()
+                    Message = issue.Message.Trim()
+                    Details = normalizeOptionalString issue.Details }) }
+
+    let validateEnvelope (envelope: FStarIntentModuleEnvelope) =
+        let normalized = normalizeEnvelope envelope
+        let schemaValidation =
+            JsonSerializer.SerializeToElement(normalized, serializerOptions)
+            |> RawIntentContracts.validateParseEnvelope
+
+        let semanticIssues =
+            match normalized.Status, normalized.ModuleText with
+            | "parsed", None ->
+                [ diagnostic "MISSING_MODULE_TEXT" "The model reported a parsed result without moduleText." None ]
+            | "parsed", Some moduleText ->
+                match IntentAdmission.tryParseCandidateModule moduleText with
+                | Ok _ -> []
+                | Error issues -> issues
+            | "clarification_required", _ ->
+                if normalized.Issues.IsEmpty then
+                    [ diagnostic
+                        "CLARIFICATION_REQUIRED"
+                        "The model requested clarification but did not explain which semantic fields were missing."
+                        None ]
+                else
+                    []
+            | other, _ ->
+                [ diagnostic
+                    "SCHEMA_MISMATCH"
+                    $"The model returned an unsupported status '{other}'."
+                    None ]
+
+        normalized, (schemaValidation.Issues @ semanticIssues), schemaValidation.Report
+
+    let simulateAttemptSequence (envelopes: FStarIntentModuleEnvelope list) =
+        let attempts = ResizeArray<LlmParseAttempt>()
+        let mutable selectedEnvelope = None
+        let mutable selectedOutcome = "exhausted"
+        let mutable finalDiagnostics = []
+
+        for index = 0 to envelopes.Length - 1 do
+            if selectedEnvelope.IsNone && finalDiagnostics.IsEmpty then
+                let normalizedEnvelope, validationIssues, _ = validateEnvelope envelopes[index]
+
+                attempts.Add
+                    { Attempt = index + 1
+                      Source = "simulation"
+                      Outcome =
+                        if validationIssues.IsEmpty then
+                            normalizedEnvelope.Status
+                        else
+                            "repair_required"
+                      ResponseId = None
+                      FinishReason = None
+                      Issues = validationIssues }
+
+                if validationIssues.IsEmpty then
+                    selectedEnvelope <- Some normalizedEnvelope
+                    selectedOutcome <- normalizedEnvelope.Status
+                    finalDiagnostics <-
+                        if normalizedEnvelope.Status = "clarification_required" then
+                            normalizedEnvelope.Issues
+                        else
+                            []
+                else if index = envelopes.Length - 1 then
+                    selectedOutcome <- "repair_exhausted"
+                    finalDiagnostics <- validationIssues
+
+        { Envelope = selectedEnvelope
+          SelectedOutcome = selectedOutcome
+          Attempts = attempts |> Seq.toList
+          Diagnostics = finalDiagnostics }
+
 type RawIntentGenerator(chatClient: IChatClient, options: IntentLlmOptions) =
-    let promptVersion = "2026-04-19.raw-intent.v1"
+    let promptVersion = "2026-04-20.fstar-intent.v1"
 
     let diagnostic code message details =
         { Code = code
@@ -194,34 +301,68 @@ type RawIntentGenerator(chatClient: IChatClient, options: IntentLlmOptions) =
         $"""You are a semantic normalization component for TMF921 intent admission.
 
 Task:
-- Convert natural-language telecom-management intent text into ontology-aligned semantic content.
+- Convert natural-language telecom-management intent text into a restricted F* intent module.
 - Return only structured data that conforms to the requested schema.
 
+Output contract:
+- If the request is specific enough to map into the supported admission subset, return status = "parsed" and moduleText containing exactly one F* module.
+- If the request is too vague or missing core semantics, return status = "clarification_required" with issues and omit moduleText.
+
+Allowed F* shape:
+- The module must open `TmForumTr292CommonCore`.
+- It must declare exactly one `let candidate_intent : raw_tm_intent = {{ ... }}` record.
+- Use only these record fields:
+  intent_name
+  scenario_family
+  target_name
+  target_kind
+  service_class
+  event_month
+  event_day
+  event_year
+  start_hour
+  end_hour
+  timezone
+  primary_device_count
+  auxiliary_endpoint_count
+  max_latency_ms
+  reporting_interval_minutes
+  immediate_degradation_alerts
+  safety_policy_declared
+  preserve_emergency_traffic
+  request_public_safety_preemption
+
+Allowed enum values:
+- scenario_family: BroadcastFamily | CriticalServiceFamily
+- target_kind: Some VenueTarget | Some FacilityTarget | None
+
 Rules:
-- Extract semantics from the user's text without inventing targets, time windows, quantities, or policy facts.
-- Do not fix contradictions. Preserve explicit bad-but-stated semantics, such as reversed time windows.
-- Do not perform provider-policy reasoning. This step only normalizes raw intent semantics.
-- If the text is too vague to identify at least one target and one measurable expectation without guessing, return status = "clarification_required".
-- The model owns only: intentName, description, targets, expectations, context, priority.
-- Never output profile, provenance, checker, or policy fields.
-- Prefer compact normalized values over prose when possible.
+- Extract semantics from the user's text without inventing targets, dates, times, quantities, or policy facts.
+- Preserve explicit bad-but-stated semantics, such as reversed time windows.
+- Do not perform provider-admission reasoning.
+- For broadcast requests, use service_class = Some "premium-5g-broadcast" when the text clearly indicates premium 5G broadcast service.
+- For critical-service requests, use service_class = Some "ultra-reliable-5g-clinical" when the text clearly indicates telemedicine, clinical, or critical-care service.
+- Set safety_policy_declared = true only if the text explicitly states either protected-traffic preservation or public-safety preemption.
+- For BroadcastFamily, auxiliary_endpoint_count should be None unless the text explicitly includes a second endpoint quantity.
+- For CriticalServiceFamily, auxiliary_endpoint_count should be Some <nat> only when the text explicitly includes auxiliary endpoints.
+- If the text is too vague to identify a target, service class, and measurable expectations without guessing, return clarification_required.
 
 Few-shot guidance:
-1. Valid paraphrase:
-Input: "Set up premium 5G broadcast coverage for Detroit Stadium on April 25, 2026 from 18:00 to 22:00 America/Detroit for 200 production devices, keep uplink latency under 20 ms, send hourly compliance updates and immediate alerts if service quality degrades, and do not impact emergency-service traffic."
-Behavior: return status = "parsed" with a target for Detroit Stadium, measurable expectations, and the explicit protected-traffic requirement carried as an expectation/condition rather than omitted.
+1. Accepted broadcast:
+Input: "Provide a premium 5G broadcast service for the live event at Detroit Stadium on April 25, 2026 from 18:00 to 22:00 America/Detroit. Support up to 200 production devices. Keep uplink latency under 20 ms. Send hourly compliance updates and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
+Behavior: return parsed with scenario_family = BroadcastFamily, target_name = Some "Detroit Stadium", target_kind = Some VenueTarget, primary_device_count = Some 200, reporting_interval_minutes = Some 60, immediate_degradation_alerts = true, safety_policy_declared = true, preserve_emergency_traffic = true, request_public_safety_preemption = false.
 
-2. Vague request:
-Input: "Make the event network really good and fast for the broadcast."
-Behavior: return status = "clarification_required" with issues explaining that the target and measurable expectations are missing.
+2. Accepted critical service:
+Input: "Provide an ultra-reliable 5G clinical service for telemedicine and critical care operations at Mayo Clinic on April 25, 2026 from 08:00 to 20:00 America/Detroit. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms. Send compliance updates every 5 minutes and immediate alerts if service quality degrades. Do not impact emergency-service traffic."
+Behavior: return parsed with scenario_family = CriticalServiceFamily, target_name = Some "Mayo Clinic", target_kind = Some FacilityTarget, primary_device_count = Some 80, auxiliary_endpoint_count = Some 200, max_latency_ms = Some 10, reporting_interval_minutes = Some 5.
 
 3. Reversed window:
 Input: "Provide premium 5G broadcast service at Detroit Stadium on April 25, 2026 from 22:00 to 18:00 America/Detroit with latency under 20 ms and hourly reports."
-Behavior: return status = "parsed". Preserve the reversed window semantics in the description or expectation content instead of correcting it.
+Behavior: return parsed and preserve start_hour = Some 22 and end_hour = Some 18 without correcting them.
 
-4. Multi-constraint broadcast:
-Input: "Support 90 production devices at Metro Arena on April 25, 2026 from 18:00 to 22:00 America/Detroit, keep uplink latency under 30 ms, send hourly updates and immediate alerts, and do not impact emergency-service traffic."
-Behavior: return status = "parsed" with the venue target and multiple expectations.
+4. Vague request:
+Input: "Make the event network really good and fast for the broadcast."
+Behavior: return clarification_required with issues describing the missing target and measurable expectations.
 
 Current prompt version: {promptVersion}"""
 
@@ -246,16 +387,17 @@ Server validation failures from the previous attempt:
 
 Repair only those failures while preserving the user's stated semantics."""
 
-        $"""Normalize the following natural-language input into ontology semantic content.
+        $"""Normalize the following natural-language input into a restricted F* intent module.
 
 Natural-language intent:
 \"\"\"{text}\"\"\"
 {repairSection}
 
 Reminder:
-- If you cannot produce a target and at least one expectation without guessing, return status = "clarification_required".
-- Do not emit provider or provenance fields.
-- Do not explain outside the structured response."""
+- Return only the structured response.
+- When parsed, moduleText must contain exactly one F* module using the allowed record shape.
+- Do not emit provider witness code or additional helper functions.
+- Do not invent unstated facts."""
 
     let trySerializeRawRepresentation (value: obj) =
         if isNull value then
@@ -265,133 +407,6 @@ Reminder:
                 Some(JsonSerializer.Serialize(value, serializerOptions))
             with _ ->
                 None
-
-    let normalizeOptionalString (value: string option) =
-        value
-        |> Option.bind (fun text ->
-            let trimmed = text.Trim()
-            if String.IsNullOrWhiteSpace trimmed then None else Some trimmed)
-
-    let normalizeConditionClause (value: RawIntentConditionClause) =
-        { Kind = normalizeOptionalString value.Kind
-          Subject = normalizeOptionalString value.Subject
-          Operator = normalizeOptionalString value.Operator
-          Value = normalizeOptionalString value.Value }
-
-    let normalizeCondition (value: RawIntentCondition) =
-        let children =
-            if isNull (box value.Children) then
-                []
-            else
-                value.Children
-
-        { Kind = normalizeOptionalString value.Kind
-          Subject = normalizeOptionalString value.Subject
-          Operator = normalizeOptionalString value.Operator
-          Value = normalizeOptionalString value.Value
-          Children = children |> List.map normalizeConditionClause }
-
-    let normalizeTarget (value: RawIntentTarget) =
-        { Id = normalizeOptionalString value.Id
-          TargetType = normalizeOptionalString value.TargetType
-          Name = normalizeOptionalString value.Name }
-
-    let normalizeQuantity (value: RawIntentQuantity) =
-        { Value = normalizeOptionalString value.Value
-          Unit = normalizeOptionalString value.Unit }
-
-    let normalizeFunctionApplication (value: RawIntentFunctionApplication) =
-        let arguments =
-            if isNull (box value.Arguments) then
-                []
-            else
-                value.Arguments
-
-        { Name = normalizeOptionalString value.Name
-          Arguments =
-            arguments
-            |> List.map (fun argument -> argument.Trim())
-            |> List.filter (String.IsNullOrWhiteSpace >> not) }
-
-    let normalizeExpectation (value: RawIntentExpectation) =
-        { Kind = normalizeOptionalString value.Kind
-          Subject = normalizeOptionalString value.Subject
-          Description = normalizeOptionalString value.Description
-          Condition = value.Condition |> Option.map normalizeCondition
-          Quantity = value.Quantity |> Option.map normalizeQuantity
-          FunctionApplication = value.FunctionApplication |> Option.map normalizeFunctionApplication }
-
-    let normalizeEnvelope (envelope: RawIntentParseEnvelope) =
-        let normalizedCore =
-            envelope.SemanticCore
-            |> Option.map (fun core ->
-                let targets =
-                    if isNull (box core.Targets) then
-                        []
-                    else
-                        core.Targets
-
-                let expectations =
-                    if isNull (box core.Expectations) then
-                        []
-                    else
-                        core.Expectations
-
-                { IntentName = normalizeOptionalString core.IntentName
-                  Description = normalizeOptionalString core.Description
-                  Targets = targets |> List.map normalizeTarget
-                  Expectations = expectations |> List.map normalizeExpectation
-                  Context = normalizeOptionalString core.Context
-                  Priority = normalizeOptionalString core.Priority })
-
-        let normalizedIssues =
-            (if isNull (box envelope.Issues) then [] else envelope.Issues)
-            |> List.map (fun issue ->
-                { issue with
-                    Code = issue.Code.Trim()
-                    Message = issue.Message.Trim()
-                    Details = normalizeOptionalString issue.Details })
-
-        { Status =
-            if isNull envelope.Status then
-                ""
-            else
-                envelope.Status.Trim().ToLowerInvariant()
-          SemanticCore = normalizedCore
-          Issues = normalizedIssues }
-
-    let validateEnvelope (envelope: RawIntentParseEnvelope) =
-        let normalized = normalizeEnvelope envelope
-        let schemaValidation =
-            JsonSerializer.SerializeToElement(normalized, serializerOptions)
-            |> RawIntentContracts.validateParseEnvelope
-
-        let semanticIssues =
-            match normalized.Status, normalized.SemanticCore with
-            | "parsed", None ->
-                [ diagnostic "SCHEMA_MISMATCH" "The model reported a parsed result without semanticCore content." None ]
-            | "parsed", Some semanticCore ->
-                [ if semanticCore.IntentName |> Option.isNone then
-                      yield diagnostic "MISSING_INTENT_NAME" "The parsed intent is missing intentName." None
-                  if semanticCore.Targets.IsEmpty then
-                      yield diagnostic "MISSING_TARGETS" "The parsed intent is missing targets." None
-                  if semanticCore.Expectations.IsEmpty then
-                      yield diagnostic "MISSING_EXPECTATIONS" "The parsed intent is missing expectations." None ]
-            | "clarification_required", _ ->
-                if normalized.Issues.IsEmpty then
-                    [ diagnostic
-                        "CLARIFICATION_REQUIRED"
-                        "The model requested clarification but did not explain which semantic fields were missing."
-                        None ]
-                else
-                    []
-            | other, _ ->
-                [ diagnostic
-                    "SCHEMA_MISMATCH"
-                    $"The model returned an unsupported status '{other}'."
-                    None ]
-
-        normalized, (schemaValidation.Issues @ semanticIssues), schemaValidation.Report
 
     let maybeRefusal (rawResponseText: string option) =
         rawResponseText
@@ -407,7 +422,7 @@ Reminder:
         let options = ChatOptions()
         options.ModelId <- effectiveOptions.Model
         options.Temperature <- Nullable effectiveOptions.Temperature
-        options.MaxOutputTokens <- Nullable 3000
+        options.MaxOutputTokens <- Nullable 3500
         options
 
     let metadata outcome usedFixture fixtureId attempts =
@@ -420,14 +435,14 @@ Reminder:
           Attempts = attempts }
 
     interface IRawIntentGenerator with
-        member _.GenerateSemanticCoreAsync(context, text, cancellationToken) =
+        member _.GenerateIntentModuleAsync(context, text, cancellationToken) =
             task {
                 let fixtureResult =
                     match context.ScenarioId with
                     | Some scenarioId when effectiveOptions.UseScenarioFixtures && context.UseScenarioFixtures ->
                         match RawIntentScenarioFixtures.tryRead scenarioId with
                         | Some fixture ->
-                            let normalizedEnvelope = normalizeEnvelope fixture.Envelope
+                            let normalizedEnvelope = RawIntentGenerationValidation.normalizeEnvelope fixture.Envelope
                             let attempt =
                                 { Attempt = 1
                                   Source = "fixture"
@@ -456,7 +471,7 @@ Reminder:
                     return result
                 | None ->
                     let attempts = ResizeArray<LlmParseAttempt>()
-                    let mutable priorIssues = []
+                    let mutable priorIssues = context.RepairIssues
                     let mutable finalEnvelope = None
                     let mutable finalPromptText = None
                     let mutable finalResponseText = None
@@ -481,7 +496,7 @@ Reminder:
                                 use linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token)
 
                                 let! response =
-                                    chatClient.GetResponseAsync<RawIntentParseEnvelope>(
+                                    chatClient.GetResponseAsync<FStarIntentModuleEnvelope>(
                                         messages,
                                         llmStructuredOutputSerializerOptions,
                                         buildChatOptions (),
@@ -502,13 +517,12 @@ Reminder:
                                     else
                                         None
 
-                                let responseId =
-                                    response.ResponseId |> Option.ofObj
-
-                                let mutable parsed = Unchecked.defaultof<RawIntentParseEnvelope>
+                                let responseId = response.ResponseId |> Option.ofObj
+                                let mutable parsed = Unchecked.defaultof<FStarIntentModuleEnvelope>
 
                                 if response.TryGetResult(&parsed) then
-                                    let normalizedEnvelope, validationIssues, _ = validateEnvelope parsed
+                                    let normalizedEnvelope, validationIssues, _ =
+                                        RawIntentGenerationValidation.validateEnvelope parsed
 
                                     let attempt =
                                         { Attempt = attemptNumber

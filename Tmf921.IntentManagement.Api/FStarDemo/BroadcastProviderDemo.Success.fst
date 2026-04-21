@@ -25,11 +25,11 @@ let selected_profile : profile =
 let measurable : measurable_intent success_intent =
   mk_measurable success_intent
 
+let quantity_checked : quantity_checked_intent success_intent =
+  mk_quantity_checked success_intent
+
 let window_checked : window_checked_intent success_intent =
   mk_window_checked success_intent
-
-let tm_checked : tm_checked_intent success_intent =
-  mk_tm_checked success_intent
 
 let profiled : profiled_intent selected_profile success_intent =
   mk_profiled selected_profile success_intent

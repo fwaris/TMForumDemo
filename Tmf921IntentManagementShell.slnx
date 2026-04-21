@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="Tmf921.IntentManagement.Api/Tmf921.IntentManagement.Api.fsproj" />
+  <Project Path="Tmf921.IntentManagement.Api.Tests/Tmf921.IntentManagement.Api.Tests.fsproj" />
 </Solution>

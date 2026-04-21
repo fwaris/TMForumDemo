@@ -159,7 +159,7 @@ This gate rejects under-specified requests before any provider-specific reasonin
 
 ### 5.2 Provider-Level Admissibility
 
-The second gate checks whether a TM-valid intent is admissible for a provider profile associated with a venue. In the current model:
+The second gate checks whether a TR292/common-core-valid intent is admissible for a provider profile associated with a venue. In the current model:
 
 - `DetroitStadium` maps to a `LiveBroadcastGold` profile,
 - `MetroArena` maps to a `LiveBroadcastSilver` profile.
@@ -173,7 +173,7 @@ Each profile defines resource and policy bounds, including:
 - preservation of emergency-service traffic,
 - and prohibition on preempting reserved public-safety capacity.
 
-These predicates are encoded in F* as functions over a typed `tm_intent` record. Success cases inhabit a staged sequence of refined types including `measurable_intent`, `window_checked_intent`, `tm_checked_intent`, `profiled_intent p`, `capacity_checked_intent p`, `latency_checked_intent p`, `policy_checked_intent p`, and `provider_checked_intent p`. When all stages succeed, the system can additionally construct an `admission_token p`, making the downstream consequence of acceptance explicit.
+These predicates are encoded in F* as functions over a typed `tm_intent` record. Success cases inhabit a staged sequence of refined types including `measurable_intent`, `quantity_checked_intent`, `window_checked_intent`, `profiled_intent p`, `capacity_checked_intent p`, `latency_checked_intent p`, `policy_checked_intent p`, and `provider_checked_intent p`. The first two stages are the TR292/common-core witness ladder; window, profile, capacity, latency, and policy are provider-side refinements. When all stages succeed, the system can additionally construct an `admission_token p`, making the downstream consequence of acceptance explicit.
 
 ### 5.3 Why Two Gates Matter
 
@@ -197,19 +197,19 @@ The main implementation components are:
 - a domain model for TMF921-like resources and processing metadata,
 - an intent pipeline for classification, normalization, JSON-LD emission, and artifact generation,
 - a demo scenario layer that parses selected natural-language requests into a typed domain record and compares them against a JSON Schema baseline,
-- and F* modules that encode staged TM-level and provider-level validity predicates that culminate in a typed admission token.
+- and F* modules that encode staged TR292/common-core and provider-level validity predicates that culminate in a typed admission token.
 
 ### 6.2 Example Scenario Family
 
 The current case study uses live-broadcast service requests for event venues. The repository includes:
 
 - an end-to-end success case,
-- a reversed-window case that passes JSON validation but fails TM witness construction,
+- a reversed-window case that passes JSON validation and common-core validation but fails provider window refinement,
 - a capacity-failure case,
 - a latency-failure case,
 - a policy-failure case,
 - a same-shape different-profile pair for Detroit Stadium and Metro Arena,
-- and a TM-level under-specification case.
+- and a common-core under-specification case.
 
 These cases exercise distinct failure modes that are common in autonomous-network settings:
 
@@ -255,15 +255,15 @@ The scenario suite currently contains eight representative cases:
 5. a request whose policy would violate protected public-safety rules,
 6. a Detroit Stadium request that passes under the Gold profile,
 7. a Metro Arena request with the same JSON shape that fails under the Silver profile,
-8. and a vague request that should fail TM-level normalization.
+8. and a vague request that should fail TR292/common-core normalization.
 
 ### 7.3 Expected Outcomes
 
 The intended outcomes are:
 
-- the success case yields both a TM-valid and provider-valid witness and produces an admission token,
-- the reversed-window case passes JSON validation but fails at `window_checked_intent`,
-- the capacity, latency, and policy cases pass JSON validation and TM witness construction but fail at distinct provider witnesses,
+- the success case yields both a common-core-valid and provider-valid witness and produces an admission token,
+- the reversed-window case passes JSON validation and common-core validation but fails at the provider-side `window_checked_intent`,
+- the capacity, latency, and policy cases pass JSON validation and common-core witness construction but fail at distinct provider witnesses,
 - the Detroit/Metro pair shows that the same JSON shape can be accepted or rejected depending on the resolved provider profile,
 - and the vague request is rejected before provider admission.
 
@@ -356,7 +356,7 @@ End-to-end architecture:
 - canonical IR builder
 - JSON-LD emitter
 - F* artifact generator
-- TM-level validity gate
+- TR292/common-core validity gate
 - provider-level validity gate
 - shell-processing audit endpoint
 
@@ -367,7 +367,7 @@ Live-broadcast witness ladder showing:
 - original natural-language request,
 - normalized JSON shape,
 - JSON baseline verdict,
-- TM and provider witness stages,
+- common-core and provider witness stages,
 - admission token when successful.
 
 ### Figure 3
@@ -387,7 +387,7 @@ Scenario summary table:
 | Scenario | JSON baseline | First failed witness | Provider-valid | Admission token |
 |---|---|---|---|
 | Broadcast success | Pass | N/A | Yes | Yes |
-| Window failure | Pass | `window_checked_intent` | N/A | No |
+| Window failure | Pass | `window_checked_intent` | No | No |
 | Capacity failure | Pass | `capacity_checked_intent` | No | No |
 | Latency failure | Pass | `latency_checked_intent` | No | No |
 | Policy failure | Pass | `policy_checked_intent` | No | No |

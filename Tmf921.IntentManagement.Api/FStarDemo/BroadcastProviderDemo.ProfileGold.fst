@@ -25,11 +25,11 @@ let selected_profile : profile =
 let measurable : measurable_intent gold_profile_intent =
   mk_measurable gold_profile_intent
 
+let quantity_checked : quantity_checked_intent gold_profile_intent =
+  mk_quantity_checked gold_profile_intent
+
 let window_checked : window_checked_intent gold_profile_intent =
   mk_window_checked gold_profile_intent
-
-let tm_checked : tm_checked_intent gold_profile_intent =
-  mk_tm_checked gold_profile_intent
 
 let profiled : profiled_intent selected_profile gold_profile_intent =
   mk_profiled selected_profile gold_profile_intent

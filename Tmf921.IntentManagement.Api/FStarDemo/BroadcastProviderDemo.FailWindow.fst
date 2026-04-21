@@ -22,5 +22,8 @@ let reversed_window_intent : tm_intent =
 let measurable : measurable_intent reversed_window_intent =
   mk_measurable reversed_window_intent
 
+let quantity_checked : quantity_checked_intent reversed_window_intent =
+  mk_quantity_checked reversed_window_intent
+
 let window_checked : window_checked_intent reversed_window_intent =
   mk_window_checked reversed_window_intent

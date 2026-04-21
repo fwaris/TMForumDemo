@@ -25,11 +25,11 @@ let selected_profile : profile =
 let measurable : measurable_intent unsafe_policy_intent =
   mk_measurable unsafe_policy_intent
 
+let quantity_checked : quantity_checked_intent unsafe_policy_intent =
+  mk_quantity_checked unsafe_policy_intent
+
 let window_checked : window_checked_intent unsafe_policy_intent =
   mk_window_checked unsafe_policy_intent
-
-let tm_checked : tm_checked_intent unsafe_policy_intent =
-  mk_tm_checked unsafe_policy_intent
 
 let profiled : profiled_intent selected_profile unsafe_policy_intent =
   mk_profiled selected_profile unsafe_policy_intent

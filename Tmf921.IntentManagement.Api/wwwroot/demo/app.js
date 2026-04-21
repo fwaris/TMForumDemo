@@ -111,7 +111,7 @@ function outcomeLabel(finalOutcome) {
     case "rejected_provider":
       return "Rejected by provider witnesses";
     case "rejected_tm":
-      return "Rejected during TM witness construction";
+      return "Rejected during TR292/common-core witness construction";
     default:
       return "Unexpected outcome";
   }
@@ -159,7 +159,7 @@ function providerSummaryText(validation) {
     return `Provider witness fails at ${provider.failedWitness || "provider_checked_intent"}.`;
   }
 
-  return "Provider witness is skipped because the TM witness does not exist.";
+  return "Provider witness is skipped because the TR292/common-core witness does not exist.";
 }
 
 function jsonSummaryText(validation) {
@@ -170,8 +170,8 @@ function jsonSummaryText(validation) {
 
 function tmSummaryText(validation) {
   return validation.dependentTm.accepted
-    ? "A TM-level witness can be constructed from the normalized intent."
-    : `TM witness construction stops at ${validation.dependentTm.failedWitness || "the TM stage"}.`;
+    ? "A TR292/common-core witness can be constructed from the normalized intent."
+    : `TR292/common-core witness construction stops at ${validation.dependentTm.failedWitness || "the common-core stage"}.`;
 }
 
 function renderConstraintTrace(trace) {
@@ -336,7 +336,7 @@ function applyResult(result) {
   );
 
   renderIssues(jsonIssues, validation.jsonBaseline.issues || [], "No JSON baseline issues.");
-  renderIssues(tmIssues, validation.dependentTm.issues || [], "No TM witness issues.");
+  renderIssues(tmIssues, validation.dependentTm.issues || [], "No TR292/common-core witness issues.");
   renderIssues(providerIssues, validation.dependentProvider.issues || [], "No provider witness issues.");
   renderConstraintTrace(validation.constraintTrace || []);
 

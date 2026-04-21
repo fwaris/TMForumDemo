@@ -25,11 +25,11 @@ let selected_profile : profile =
 let measurable : measurable_intent low_latency_intent =
   mk_measurable low_latency_intent
 
+let quantity_checked : quantity_checked_intent low_latency_intent =
+  mk_quantity_checked low_latency_intent
+
 let window_checked : window_checked_intent low_latency_intent =
   mk_window_checked low_latency_intent
-
-let tm_checked : tm_checked_intent low_latency_intent =
-  mk_tm_checked low_latency_intent
 
 let profiled : profiled_intent selected_profile low_latency_intent =
   mk_profiled selected_profile low_latency_intent

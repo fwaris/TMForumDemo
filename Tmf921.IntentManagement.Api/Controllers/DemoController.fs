@@ -17,6 +17,7 @@ type DemoController(rawIntentGenerator: IRawIntentGenerator) =
 
     let scenarioSummary (scenario: DemoScenarios.DemoScenarioDefinition) =
         {| id = scenario.Id
+           scenarioFamily = IntentAdmission.familyName scenario.ScenarioFamily
            title = scenario.Title
            kicker = scenario.Kicker
            expectedOutcome = string scenario.ExpectedOutcome
@@ -34,6 +35,7 @@ type DemoController(rawIntentGenerator: IRawIntentGenerator) =
         (scenario: DemoScenarios.DemoScenarioDefinition)
         (referenceFStar: string option) =
         {| id = scenario.Id
+           scenarioFamily = IntentAdmission.familyName scenario.ScenarioFamily
            title = scenario.Title
            kicker = scenario.Kicker
            expectedOutcome = string scenario.ExpectedOutcome
@@ -104,17 +106,18 @@ type DemoController(rawIntentGenerator: IRawIntentGenerator) =
             let updates = ResizeArray<obj>()
 
             for scenario in DemoScenarios.scenarios do
-                let! generated =
-                    rawIntentGenerator.GenerateSemanticCoreAsync(
+                let! generated : RawIntentGenerationResult =
+                    rawIntentGenerator.GenerateIntentModuleAsync(
                         { ScenarioId = Some scenario.Id
-                          UseScenarioFixtures = false },
+                          UseScenarioFixtures = false
+                          RepairIssues = [] },
                         scenario.Text,
                         this.HttpContext.RequestAborted
                     )
 
                 match generated.Envelope with
                 | Some envelope ->
-                    let fixture =
+                    let fixture : ScenarioRawIntentFixture =
                         { ScenarioId = scenario.Id
                           Model = generated.Metadata.Model |> Option.defaultValue IntentLlmDefaults.value.Model
                           PromptVersion = generated.Metadata.PromptVersion |> Option.defaultValue ""

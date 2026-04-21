@@ -16,10 +16,12 @@
     <Compile Include="Domain.fs" />
     <Compile Include="Store.fs" />
     <Compile Include="ShellResources.fs" />
+    <Compile Include="IntentAdmission.fs" />
     <Compile Include="RawIntentGeneration.fs" />
     <Compile Include="Routing.fs" />
     <Compile Include="IntentPipeline.fs" />
     <Compile Include="DemoScenarios.fs" />
+    <Compile Include="BenchmarkRunner.fs" />
     <Compile Include="Controllers/HubController.fs" />
     <Compile Include="Controllers/DemoController.fs" />
     <Compile Include="Controllers/IntentController.fs" />

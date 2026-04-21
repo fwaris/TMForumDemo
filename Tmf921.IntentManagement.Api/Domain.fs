@@ -337,10 +337,56 @@ type RawIntentSemanticCore =
 type RawIntentParseEnvelope =
     { [<JsonPropertyName("status")>]
       Status: string
-      [<JsonPropertyName("semanticCore")>]
-      SemanticCore: RawIntentSemanticCore option
+      [<JsonPropertyName("moduleText")>]
+      ModuleText: string option
       [<JsonPropertyName("issues")>]
       Issues: ProcessingDiagnostic list }
+
+[<CLIMutable>]
+type FStarIntentModuleEnvelope =
+    { [<JsonPropertyName("status")>]
+      Status: string
+      [<JsonPropertyName("moduleText")>]
+      ModuleText: string option
+      [<JsonPropertyName("issues")>]
+      Issues: ProcessingDiagnostic list }
+
+[<CLIMutable>]
+type OperationalIntentRecord =
+    { [<JsonPropertyName("intentName")>]
+      IntentName: string
+      [<JsonPropertyName("scenarioFamily")>]
+      ScenarioFamily: string option
+      [<JsonPropertyName("targetName")>]
+      TargetName: string option
+      [<JsonPropertyName("targetKind")>]
+      TargetKind: string option
+      [<JsonPropertyName("serviceClass")>]
+      ServiceClass: string option
+      [<JsonPropertyName("eventDate")>]
+      EventDate: string option
+      [<JsonPropertyName("startHour")>]
+      StartHour: int option
+      [<JsonPropertyName("endHour")>]
+      EndHour: int option
+      [<JsonPropertyName("timezone")>]
+      Timezone: string option
+      [<JsonPropertyName("primaryDeviceCount")>]
+      PrimaryDeviceCount: int option
+      [<JsonPropertyName("auxiliaryEndpointCount")>]
+      AuxiliaryEndpointCount: int option
+      [<JsonPropertyName("maxLatencyMs")>]
+      MaxLatencyMs: int option
+      [<JsonPropertyName("reportingIntervalMinutes")>]
+      ReportingIntervalMinutes: int option
+      [<JsonPropertyName("immediateDegradationAlerts")>]
+      ImmediateDegradationAlerts: bool
+      [<JsonPropertyName("safetyPolicyDeclared")>]
+      SafetyPolicyDeclared: bool
+      [<JsonPropertyName("preserveEmergencyTraffic")>]
+      PreserveEmergencyTraffic: bool
+      [<JsonPropertyName("requestPublicSafetyPreemption")>]
+      RequestPublicSafetyPreemption: bool }
 
 [<CLIMutable>]
 type LlmParseAttempt =
@@ -391,12 +437,26 @@ type SidecarArtifacts =
       LlmPrompt: ArtifactReference option
       [<JsonPropertyName("llmResponse")>]
       LlmResponse: ArtifactReference option
+      [<JsonPropertyName("operationalIntent")>]
+      OperationalIntent: ArtifactReference option
       [<JsonPropertyName("semanticCore")>]
       SemanticCore: ArtifactReference option
       [<JsonPropertyName("ontologyRawIntent")>]
       OntologyRawIntent: ArtifactReference option
       [<JsonPropertyName("ontologyValidationReport")>]
       OntologyValidationReport: ArtifactReference option
+      [<JsonPropertyName("candidateIntentModule")>]
+      CandidateIntentModule: ArtifactReference option
+      [<JsonPropertyName("candidateIntentCheck")>]
+      CandidateIntentCheck: ArtifactReference option
+      [<JsonPropertyName("tmWitnessModule")>]
+      TmWitnessModule: ArtifactReference option
+      [<JsonPropertyName("tmWitnessCheck")>]
+      TmWitnessCheck: ArtifactReference option
+      [<JsonPropertyName("providerWitnessModule")>]
+      ProviderWitnessModule: ArtifactReference option
+      [<JsonPropertyName("providerWitnessCheck")>]
+      ProviderWitnessCheck: ArtifactReference option
       [<JsonPropertyName("canonicalIr")>]
       CanonicalIr: ArtifactReference option
       [<JsonPropertyName("generatedIntent")>]
@@ -420,12 +480,24 @@ type IntentProcessingRecord =
       Status: ProcessingStatus
       [<JsonPropertyName("profile")>]
       Profile: OntologyProfile
+      [<JsonPropertyName("operationalIntent")>]
+      OperationalIntent: OperationalIntentRecord option
       [<JsonPropertyName("canonicalIntent")>]
       CanonicalIntent: CanonicalIntentIr option
       [<JsonPropertyName("normalizedJsonLd")>]
       NormalizedJsonLd: JsonElement option
       [<JsonPropertyName("checkedFStarModule")>]
       CheckedFStarModule: string option
+      [<JsonPropertyName("tmWitnessStatus")>]
+      TmWitnessStatus: string option
+      [<JsonPropertyName("providerWitnessStatus")>]
+      ProviderWitnessStatus: string option
+      [<JsonPropertyName("selectedProfile")>]
+      SelectedProfile: string option
+      [<JsonPropertyName("firstFailedWitness")>]
+      FirstFailedWitness: string option
+      [<JsonPropertyName("admissionOutcome")>]
+      AdmissionOutcome: string option
       [<JsonPropertyName("llmParse")>]
       LlmParse: LlmParseMetadata option
       [<JsonPropertyName("artifacts")>]
