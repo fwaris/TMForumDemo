@@ -1,0 +1,158 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{url}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Proof-Oriented Validation of LLM-Generated Intents for Autonomous Networks}
+
+% ICNP 2026 currently uses double-blind review. Replace this block for camera-ready.
+\author{\IEEEauthorblockN{Anonymous Submission}}
+
+\maketitle
+
+\begin{abstract}
+Natural language (NL) intents will be increasingly the control mechanism of 5G/6G autonomous telecom networks.
+
+Example intent: ``\textit{Provide an ultra-reliable low-latency 5G service for telemedicine and critical care operations at Mayo Clinic on an ongoing basis. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms \ldots}''
+
+This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they can be ambiguous, under-specified, and may not validate against additional provider-specific operational constraints.
+
+This paper presents a prototype, high-assurance, intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API. TM921 serves as ``front door'' for NL intents and as such imposes the minimal semantic requirements through an OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by the ontology.
+
+This paper shows how natural-language intents can be trusted through proof-relevant guarantees provided by formal verification systems based on dependently typed languages. First (offline) the OWL ontology is converted to the equivalent dependent types of the F* language. These serve as propositions against which incoming intents may be checked. Then (online) received natural-language intents are translated by a Large Language Model (LLM) to F* code that is validated (type-checked) against the ontology-derived dependent types, by the F* proof checker. Only validated intents are admitted.
+
+Further, since TMF921 structure-imposition is necessarily generic, we demo provider-specific intent validation via further refinements of the ontology types.
+
+It is observed that valid intents are almost always correctly processed. Specifically, the LLM (GPT-5.4) produces correct F* code in approximately 99\% of cases on the first attempt, and achieves 100\% correctness with a single retry. These results suggest that the apparent non-determinism of natural language and LLM-generated outputs can be effectively mitigated through dependent-type-based validation.
+\end{abstract}
+
+\begin{IEEEkeywords}
+autonomous networks, large language models, formal verification, dependent types, intent admission
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Autonomous networks are a particularly demanding instance of a broader systems problem: humans and software agents can easily generate natural language requests, but fluent output is not the same as safe or correct output. Similar boundary problems already appear in configuration validation \cite{ciri}, natural-language firewall configuration \cite{firewall_nl}, and production multi-agent network management \cite{confucius}. Recent agent-security work argues that systems should apply defense-in-depth and complete mediation rather than treat model outputs as trustworthy by default \cite{security_principles}. In network control workflows, where accepted requests can eventually influence provisioning, routing, or remediation, that concern becomes operationally acute.
+
+At this boundary, two distinct sources of non-determinism must be controlled. The first is the natural-language request itself -- the same meaning can be conveyed in different surface forms. The second is the LLM-generated artifact used to interpret that request, whose output may vary across runs even when the intended meaning is unchanged. Proof-checked output validation counters both by accepting only interpretations that can be turned into the required machine-checkable artifact.
+
+Two problems arise immediately: some requests sound reasonable but are not valid intents because they omit measurable targets, time windows, service classes, or reporting conditions; others are well formed yet still inadmissible because they violate provider-specific constraints. This is especially important in autonomous networks, where software agents may submit intents on behalf of NOCs, orchestration systems, and vertical applications. The admission layer must therefore do more than parse an utterance: it must classify the input source, determine whether the request is specific enough to act on, normalize it into a typed machine representation, and surface proof-relevant constraints before provisioning decisions are made.
+
+This paper describes a prototype shell around the TM Forum \cite{tmforum_site} TMF921 Intent Management API \cite{tmf921_api_page} that addresses this admission problem. The shell is implemented as a Web API mediation layer as per the TMF921 specification. TM921 allows for intent submission in natural language, structured JSON, or weakly structured JSON formats. Here the focus is on the natural-language path.
+
+First, offline, the TM Forum intent ontology is projected into F* dependent types that capture the standards-aligned semantics of the API \cite{tr290a,tr292d,fstar_site,fstar_popl}. Then, online, incoming requests at the TM921 boundary are normalized and, for the natural-language path, translated by an LLM into F* artifacts that must type-check against that ontology-derived layer before admission. Around that checked path, the system emits a canonical intent intermediate representation (IR), normalized JSON-LD, generated F* modules, checker diagnostics, and hashes for traceability. 
+
+Our argument is not that formal methods alone solve autonomous-network safety, nor that natural-language interfaces should be avoided. Instead, we argue for a narrow and practical claim: the boundary between LLM generation and provider execution is the right place to combine standards-aligned API handling, semantic normalization, and machine-checked admissibility tests. Autonomous networking is the motivating domain here, but the pattern applies more generally wherever model-generated artifacts must be highly trusted before they can allocate resources, change policy, or trigger control-plane actions.
+
+\subsection{Contributions}
+
+This paper makes two contributions:
+\begin{enumerate}
+\item It frames dependent-type, proof-oriented validation as an admission-layer pattern for high-trust LLM outputs and instantiates that pattern at the TMF921 boundary \cite{tmf921_spec,tr292_tio}.
+\item It separates general intent validity from provider-specific admissibility, allowing failures such as under-specification, infeasible requests, and policy violations to be localized. This is achieved by successively refining the dependent types derived from the TM Forum ontology, to provider-specific types. This system allows different providers to use the same standards-aligned core while layering on their own constraints.
+\end{enumerate}
+
+\section{Motivation and Problem Statement}
+
+In autonomous-network operations, as in other agent-driven interfaces, readable requests are not automatically safe requests. A natural-language submission may be ambiguous or incomplete; a well-formed submission may still violate provider policy. We therefore study the following problem:
+
+\textbf{Intent admission problem.} Given a TMF921 intent submission whose expression may be structured, weakly structured, or natural language, determine whether it can be normalized into a sufficiently specific and policy-compliant representation for execution. If yes, emit the normalized representation together with proof-relevant evidence; if no, reject it with diagnostics.
+
+The objective is safe admissibility rather than parsing accuracy. Although we instantiate the problem with TMF921 intents, the same structure appears whenever an LLM-generated artifact must be checked for specificity, measurability, and policy compliance before action \cite{firewall_nl,ciri,confucius}.
+
+\section{Processing Overview}
+
+The architecture has two stages. Offline, a selected subset of the TM Forum intent ontology is projected into F* modules that define the standards-aligned baseline used by the checker \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}. Online, the TM921 expression field is treated as an admission boundary: inputs are classified, normalized into a canonical IR, translated into F* artifacts when needed, and admitted only if both standards-aligned and provider-specific predicates hold. Accepted requests are emitted as normalized JSON-LD \cite{tmf921_spec,jsonld11} and accompanied by diagnostics and hashes for traceability.
+
+The processing pipeline is as follows:
+
+\begin{enumerate}
+\item A request is received at the TMF921 conformant Web API.
+\item The request is classified as canonical, normalizable, natural language, or ambiguous.
+\item If the request is natural language, it is translated by an LLM into F* code that is intended to represent the semantics of the request.
+\item The generated F* code is type-checked against the dependent types derived from the TM Forum intent ontology. This step ensures that the request is specific enough to be considered an actionable intent according to the standards-aligned semantics.
+\item If the type-checking succeeds, the request is admitted and emitted as normalized JSON-LD, F* modules plus other artifacts, for traceability and auditability. 
+\item Then provider-specific refinements are applied as further checks. If these checks fail, the request is rejected with diagnostics.
+\end{enumerate}
+
+\section{Example Ontology Fragment and Refinement}
+
+Consider a f
+
+The prototype is intentionally conservative. It focuses on the admission boundary rather than full TMF921 coverage or arbitrary LLM-based execution. The same structure can be reused in other high-trust domains by replacing the ontology subset and refinement predicates.
+
+\section{Admission Boundary and Validation}
+
+The TM921 shell treats every submission as a candidate intent rather than executable authority. Inputs are classified as canonical, normalizable, natural language, or ambiguous; admitted inputs are lowered into a canonical IR that records proof-relevant fields and source provenance. This typed interposition is aligned with prior work on typed IRs and safety gates for LLM-assisted systems \cite{firewall_nl,mtp,ciri}, and operationalizes complete mediation at the intent boundary \cite{security_principles}.
+
+
+
+
+
+and uses the TMF921 stack as a standards-aligned admissibility contract rather than merely a wire format \cite{tmf921_spec,tr292_tio}. Offline, a selected subset of the TM Forum intent ontology is projected into F* dependent types \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}; online, incoming requests at the TM921 boundary are normalized and, for the natural-language path, translated by an LLM into F* artifacts that must type-check against that ontology-derived layer before admission. Around that checked path, the system emits a canonical intent intermediate representation, normalized JSON-LD, generated F* modules, checker diagnostics, and hashes for traceability. For the current network case study, the shell also compares those typed checks against a repo-local JSON Schema baseline so that the value of proof-oriented validation is visible rather than assumed.
+
+
+Figure~\ref{fig:ontology-fragment} shows the compact TR290A/TR292D fragment used by the case study. The projection preserves only the subset needed at the admission boundary: intent structure, targets, expectations, and measurable quantities \cite{tr290a,tr292d}. Provider constraints are then layered on top of that standards-aligned core, consistent with TIO's modular model \cite{tr292_tio,tr292i}.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{tr290a_tr292d_fragment.pdf}
+\caption{Simplified class-level fragment used by the case study; adapted from TR290A Sections 2, 4, 5, 8, and 9 \cite{tr290a} and TR292D Sections 2 and 5 \cite{tr292d}. TM921 provides the expression envelope used to carry this ontology content over the API \cite{tmf921_spec}.}
+\label{fig:ontology-fragment}
+\end{figure}
+
+The admission model has two gates. The first asks whether the request is specific enough to count as an actionable intent at all: it must contain the proof-relevant structure, measurable quantities, and temporal context required by the selected TR290A/TR292D subset \cite{tr290a,tr292d}. The second applies provider-specific refinements such as capacity, latency, reporting, and traffic-protection constraints \cite{tr292_tio,tr292i}. This separation matters because it distinguishes requests that are not real intents from requests that are real intents but unsafe to enact.
+
+The shell also retains sidecar evidence so that acceptance and rejection remain auditable \cite{security_principles,ciri,confucius}. This evidence includes:
+\begin{itemize}
+\item the canonical intermediate representation (IR),
+\item normalized JSON-LD,
+\item generated F* modules, and
+\item checker diagnostics.
+\end{itemize}
+
+\section{Prototype and Case Study}
+
+The prototype is implemented as Web API service (written in F\# \cite{fsharp}) with F* models for checked scenarios \cite{fstar_site,fstar_popl}. The current case study uses live-broadcast service requests and performs two levels of validation:
+\begin{itemize}
+\item base checks against the TM Forum ontology-derived dependent types, and
+\item provider-specific checks with further refined types.
+\end{itemize}
+
+The scenario family includes one success path, several provider-side failures such as invalid window, excessive capacity, unrealistic latency, and policy violations, a profile-sensitive acceptance/rejection pair, and an under-specified request. 
+
+The study is illustrative rather than a large-scale benchmark, but it shows the value of treating LLM output as a candidate artifact that must cross a machine-checked admission boundary.
+
+\section{Discussion}
+
+The main systems point is simple: LLM output should be treated as a candidate intent, not as executable authority. In autonomous networks, this provides a bounded-autonomy control point before provisioning or remediation. More broadly, it is one practical way to enforce defense-in-depth and complete mediation for high-trust agent outputs \cite{security_principles}.
+
+TMF921 and TIO make the network instantiation concrete because they provide a standards-aligned API and semantic baseline \cite{tmf921_spec,tr292_tio}. But the pattern does not depend on telecom specifics. Any domain with a typed admissibility model and local refinement predicates can apply the same structure \cite{firewall_nl,ciri,confucius}.
+
+\section{Limitations and Future Work}
+
+The current evidence is architectural rather than broad empirical. The natural-language handling is narrow, the provider model is simplified, and the evaluation covers a single scenario family. The next steps are to broaden the scenario set, connect admission checks to dynamic state, and compare proof-oriented admission more systematically against lighter-weight baselines.
+
+\section{Related Work}
+
+Prior work already points toward validated intermediate artifacts for LLM-assisted systems. Ciri studies output checking for configuration validation \cite{ciri}, while Taghiyev and Aslanbayli use natural language only to produce a typed IR for firewall rules \cite{firewall_nl}. Meaning-Typed Programming similarly argues for semantically structured intermediate representations in LLM-integrated applications \cite{mtp}. Our work follows the same direction, but emphasizes proof-oriented admissibility at the execution boundary.
+
+On the safety side, Zhang et al. argue that LLM agents should adopt classic security principles such as defense-in-depth and complete mediation \cite{security_principles}. In networking, the Confucius framework shows that multi-agent systems already rely on validation layers and existing tooling to reduce regressions \cite{confucius}. Our contribution is complementary: we focus on the earlier boundary where candidate requests first become eligible for authoritative handling.
+
+\section{Conclusion}
+
+This paper argues that the admission boundary is the right place to enforce high assurance over LLM-generated intents. In the TMF921 case study, natural-language or weakly structured requests are treated as candidate intents, normalized into a canonical IR, and admitted only when the corresponding F* artifacts satisfy standards-aligned and provider-specific predicates.
+
+The broader lesson is that highly trusted AI outputs should not be trusted because they are fluent. They should be trusted only after they cross a machine-checked admission boundary that makes their semantics explicit, their constraints auditable, and their right to trigger downstream action conditional on proof-oriented validation.
+
+\bibliographystyle{IEEEtran}
+\bibliography{icnp2026_submission}
+
+\end{document}
