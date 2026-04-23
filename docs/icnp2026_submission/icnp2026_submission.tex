@@ -5,12 +5,16 @@
 \usepackage{graphicx}
 \usepackage{listings}
 \usepackage{url}
+\def\UrlBreaks{\do\/\do-}
+\Urlmuskip=0mu plus 1mu\relax
 
 \lstdefinestyle{fstar}{
   basicstyle=\scriptsize\ttfamily,
   breaklines=true,
   columns=fullflexible,
   frame=single,
+  float,
+  floatplacement=tbp,
   keepspaces=true,
   showstringspaces=false,
   captionpos=b
@@ -35,7 +39,7 @@ Example intent: ``\textit{Provide an ultra-reliable low-latency 5G service for t
 
 This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they can be ambiguous, under-specified, and may not validate against additional provider-specific operational constraints.
 
-This paper presents a prototype, high-assurance, intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API. TM921 serves as ``front door'' for NL intents and as such imposes the minimal semantic requirements through an OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by the ontology.
+This paper presents a prototype, high-assurance, intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API which serves as ``front door'' for NL intents and as such imposes the minimal semantic requirements through an OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by the ontology.
 
 This paper shows how natural-language intents can be trusted through proof-relevant guarantees provided by formal verification systems based on dependently typed languages. First (offline) the OWL ontology is converted to the equivalent dependent types of the F* language. These serve as propositions against which incoming intents may be checked. Then (online) received natural-language intents are translated by a Large Language Model (LLM) to F* code that is validated (type-checked) against the ontology-derived dependent types, by the F* proof checker. Only validated intents are admitted.
 
@@ -70,6 +74,71 @@ This paper makes two contributions:
 \item It separates general intent validity from provider-specific admissibility, allowing failures such as under-specification, infeasible requests, and policy violations to be localized. This is achieved by successively refining the dependent types derived from the TM Forum ontology, to provider-specific types. This system allows different providers to use the same standards-aligned core while layering on their own constraints.
 \end{enumerate}
 
+\section{Dependent Types and Proof-Oriented Validation}
+
+Dependent types let admissibility conditions be expressed as part of the \textit{type} of an artifact, so that validation is driven by type checking rather than by ad hoc downstream filters. Via the Curry--Howard correspondence \cite{propositions_as_types}, propositions can be represented as types and proofs as programs; in our setting, we encode the required intent obligations as types. Then, the LLM-generated artifact (program) is a candidate proof of those types. Successful type checking serves as machine-checked evidence of compliance. Practical proof-oriented systems such as Lean \cite{lean_theorem_prover} and F* \cite{fstar_popl} make this style of checked construction usable for real systems.
+
+To illustrate, consider a simple function type \texttt{T1: nat $\rightarrow$ nat}, where \textit{nat} is the set of natural numbers. T1 declares that the function takes a natural number as input and produces a natural number as output. We can implement a function (\textit{program}) that satisfies this type as given in Listing~\ref{lst:simple-function}.
+
+\begin{lstlisting}[style=fstar,caption={Simple function type in F*.},label={lst:simple-function}]
+//declare a function type that takes a nat and returns a nat
+type T1 = nat -> nat  
+
+//this function satisfies type T1 (as would many others)
+let addOne: T1 =  fun x -> x + 1  
+\end{lstlisting}
+
+Since \texttt{T1} is \textit{inhabited} via the function \texttt{addOne} it means that \texttt{addOne} is a proof of \texttt{T1}. So under Curry--Howard the type \texttt{T1} can be read as a proposition that is proven by the program \texttt{addOne}.
+
+Now lets consider a slightly more complex function type that accepts and returns even numbers. We can express this using dependent types given in Listing~\ref{lst:dependent-function}. Here, \texttt{Even} is a dependent type that represents the proposition that a natural number is even. Subsequently, the function type \texttt{T2} requires that inputs and outputs should be of type \texttt{Even}. 
+
+\begin{lstlisting}[style=fstar,caption={More complex dependent function type in F*.},label={lst:dependent-function}]
+//first define a dependent type for even numbers 
+//as a constraint on nat
+type Even (n:nat) = _:unit { n % 2 = 0 } 
+
+//then define a dependent function type that 
+//requires Even input and output
+type T2 = (x: nat{Even x}) -> nat{Even result}  
+
+//this function satisfies type T2 because it takes an 
+//even number and produces an even number
+let addTwo: T2 = fun x -> x + 2  
+
+//this function does NOT satisfy type T2 because it 
+//takes an even number but produces an odd number
+let addOneError: T2 = fun x -> x + 1  
+\end{lstlisting}
+
+The type \texttt{Even} is a dependent type because it \textit{depends} on the \textit{value} \texttt{n} which is supplied from where the type is used. In a dependent type system, types can depend on values. Note this explanation does not do justice to the full expressiveness of dependent types, but it gives a flavor of how they can encode constraints. 
+
+Suffice is to understand is that a complex set of constraints can be encoded as a dependent types. Even state-machines can be encoded as types. The key point is that system (or business) constraints/rules can be \textit{modelled} as types. Then, the validation (of code that uses these types) is automatic via the proof-oriented type checkers underpinning dependently-typed languages. Non-dependently typed languages -- with simpler type checkers -- cannot express such constraints as types.
+
+Once the systems/business rules are modelled as types, then LLM-generated \textit{programs} can be validated against them, thus eliminating the source of non-determinism inherent with LLM-generated outputs.
+
+\section{The Unreasonable Effectiveness of Dependent Types}
+Experiments show that current \textit{frontier} models can produce correct F* code most of the time on the first attempt, which was far less plausible in the late-2024 GPT-4o/o1 period. Table~\ref{tab:gpt54-gpt4o} compares GPT-5.4 and GPT-4o using only benchmarks that appear under the same name in official OpenAI sources. The overlap is limited, but the shared results still indicate a substantial recent increase in reasoning and agentic reliability. The same trend is reflected in the emergence of dedicated agentic coding products such as Anthropic's Claude Code \cite{claude_code_overview} and OpenAI's Codex \cite{codex_openai}.
+
+A plausible contributor to this improvement is the broader shift toward reinforcement learning with verifiable rewards (RLVR) on tasks with objective checkers, including mathematics, code, and formal reasoning. Public evidence for proprietary \textit{frontier} models remains limited. However, Google DeepMind states that the advanced Gemini Deep Think model used for International Mathematical Olympiad (IMO)-level reasoning \cite{imo_official} was additionally trained with novel reinforcement learning techniques that leverage multi-step reasoning, problem-solving, and theorem-proving data \cite{gemini_deep_think_imo}. In the open literature, Tulu 3 explicitly identifies RLVR as a post-training method \cite{tulu3_rlvr}, and recent Lean-based work shows how proof assistants can serve as verifier-grounded reward oracles during theorem-proving training \cite{process_verified_rl_lean}. While these sources do not establish that GPT-5.4 itself was post-trained on Lean traces, they do show that verifiable-reward training over formal reasoning tasks is now a credible part of the broader frontier-model toolkit.
+
+The likely involvement of dependently-typed languages in post-training of frontier LLMs (either directly or indirectly) is an indication towards their satisfactory performance on dependent-type code generation.
+
+\begin{table}[t]
+\centering
+\caption{Official OpenAI-reported results on benchmarks with exact name overlap between GPT-4o and GPT-5.4 \cite{gpt54_openai,gpt41_openai,browsecomp_openai}.}
+\label{tab:gpt54-gpt4o}
+\begin{tabular}{lcc}
+\hline
+Benchmark & GPT-4o & GPT-5.4 \\
+\hline
+GPQA Diamond & 46.0\% & 92.8\% \\
+BrowseComp & 1.9\% & 82.7\% \\
+\hline
+\end{tabular}
+
+\parbox{0.95\linewidth}{\footnotesize \textit{Note:} The BrowseComp entry uses the browsing-enabled GPT-4o result reported by OpenAI, since GPT-5.4 was evaluated on BrowseComp with ChatGPT search enabled.}
+\end{table}
+
 \section{Motivation and Problem Statement}
 
 In autonomous-network operations, as in other agent-driven interfaces, readable requests are not automatically safe requests. A natural-language submission may be ambiguous or incomplete; a well-formed submission may still violate provider policy. We therefore study the following problem:
@@ -80,7 +149,8 @@ The objective is safe admissibility rather than parsing accuracy. Although we in
 
 \section{Processing Overview}
 
-The architecture has two stages. Offline, a selected subset of the TM Forum intent ontology is projected into F* modules that define the standards-aligned baseline used by the checker \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}. Online, the TM921 expression field is treated as an admission boundary: inputs are classified, normalized into a canonical IR, translated into F* artifacts when needed, and admitted only if both standards-aligned and provider-specific predicates hold. Accepted requests are emitted as normalized JSON-LD \cite{tmf921_spec,jsonld11} and accompanied by diagnostics and hashes for traceability.
+The 
+architecture has two stages. Offline, a selected subset of the TM Forum intent ontology is projected into F* modules that define the standards-aligned baseline used by the checker \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}. Online, the TM921 expression field is treated as an admission boundary: inputs are classified, normalized into a canonical IR, translated into F* artifacts when needed, and admitted only if both standards-aligned and provider-specific predicates hold. Accepted requests are emitted as normalized JSON-LD \cite{tmf921_spec,jsonld11} and accompanied by diagnostics and hashes for traceability.
 
 Figure~\ref{fig:processing-pipeline} summarizes this online path and shows where rejection diagnostics are produced.
 

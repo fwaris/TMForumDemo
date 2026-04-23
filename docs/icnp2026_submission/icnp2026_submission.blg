@@ -13,44 +13,44 @@ Database file #1: icnp2026_submission.bib
 -- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
 
 Done.
-You've used 16 entries,
+You've used 27 entries,
             4024 wiz_defined-function locations,
-            876 strings with 9521 characters,
-and the built_in function-call counts, 7977 in all, are:
-= -- 595
-> -- 243
-< -- 0
-+ -- 118
-- -- 59
-* -- 358
-:= -- 1368
-add.period$ -- 32
-call.type$ -- 16
-change.case$ -- 25
-chr.to.int$ -- 0
-cite$ -- 16
-duplicate$ -- 619
-empty$ -- 713
-format.name$ -- 66
-if$ -- 1732
+            932 strings with 11620 characters,
+and the built_in function-call counts, 14387 in all, are:
+= -- 1109
+> -- 417
+< -- 18
++ -- 206
+- -- 98
+* -- 655
+:= -- 2451
+add.period$ -- 54
+call.type$ -- 27
+change.case$ -- 44
+chr.to.int$ -- 42
+cite$ -- 27
+duplicate$ -- 1093
+empty$ -- 1252
+format.name$ -- 109
+if$ -- 3151
 int.to.chr$ -- 0
-int.to.str$ -- 16
-missing$ -- 164
-newline$ -- 93
-num.names$ -- 16
-pop$ -- 470
+int.to.str$ -- 27
+missing$ -- 279
+newline$ -- 148
+num.names$ -- 27
+pop$ -- 778
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 2
-skip$ -- 598
+skip$ -- 1090
 stack$ -- 0
-substring$ -- 34
-swap$ -- 385
-text.length$ -- 0
+substring$ -- 159
+swap$ -- 714
+text.length$ -- 4
 text.prefix$ -- 0
 top$ -- 5
-type$ -- 16
+type$ -- 27
 warning$ -- 0
-while$ -- 16
-width$ -- 18
-write$ -- 183
+while$ -- 35
+width$ -- 29
+write$ -- 309
