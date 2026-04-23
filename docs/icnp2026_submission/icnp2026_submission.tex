@@ -3,7 +3,18 @@
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{graphicx}
+\usepackage{listings}
 \usepackage{url}
+
+\lstdefinestyle{fstar}{
+  basicstyle=\scriptsize\ttfamily,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  keepspaces=true,
+  showstringspaces=false,
+  captionpos=b
+}
 
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
@@ -71,35 +82,50 @@ The objective is safe admissibility rather than parsing accuracy. Although we in
 
 The architecture has two stages. Offline, a selected subset of the TM Forum intent ontology is projected into F* modules that define the standards-aligned baseline used by the checker \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}. Online, the TM921 expression field is treated as an admission boundary: inputs are classified, normalized into a canonical IR, translated into F* artifacts when needed, and admitted only if both standards-aligned and provider-specific predicates hold. Accepted requests are emitted as normalized JSON-LD \cite{tmf921_spec,jsonld11} and accompanied by diagnostics and hashes for traceability.
 
-The processing pipeline is as follows:
+Figure~\ref{fig:processing-pipeline} summarizes this online path and shows where rejection diagnostics are produced.
 
-\begin{enumerate}
-\item A request is received at the TMF921 conformant Web API.
-\item The request is classified as canonical, normalizable, natural language, or ambiguous.
-\item If the request is natural language, it is translated by an LLM into F* code that is intended to represent the semantics of the request.
-\item The generated F* code is type-checked against the dependent types derived from the TM Forum intent ontology. This step ensures that the request is specific enough to be considered an actionable intent according to the standards-aligned semantics.
-\item If the type-checking succeeds, the request is admitted and emitted as normalized JSON-LD, F* modules plus other artifacts, for traceability and auditability. 
-\item Then provider-specific refinements are applied as further checks. If these checks fail, the request is rejected with diagnostics.
-\end{enumerate}
+\begin{figure}[t]
+\centering
+\begingroup
+\footnotesize
+\setlength{\fboxsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\newcommand{\admissionflowbox}[2]{\fbox{\begin{minipage}{#1}\centering #2\end{minipage}}}
+\newcommand{\admissionmainbox}[1]{\admissionflowbox{0.57\linewidth}{#1}}
+\newcommand{\admissionsidebox}[1]{\admissionflowbox{0.27\linewidth}{#1}}
+\begin{tabular}{@{}c@{\hspace{0.35em}}c@{\hspace{0.35em}}c@{}}
+\admissionmainbox{\textbf{TMF921 Web API}\\request received} & & \\
+$\Downarrow$ & & \\
+\admissionmainbox{\textbf{Classify request}\\canonical, normalizable, natural language, or ambiguous}
+& $\Rightarrow$ &
+\admissionsidebox{\textbf{Reject}\\ambiguous request diagnostics} \\
+$\Downarrow$ & & \\
+\admissionmainbox{\textbf{Normalize or translate}\\canonical/normalizable $\rightarrow$ canonical IR\\natural language $\rightarrow$ LLM-generated F*}
+& & \\
+$\Downarrow$ & & \\
+\admissionmainbox{\textbf{Ontology type check}\\F* checked against TM Forum ontology-derived dependent types}
+& $\Rightarrow$ &
+\admissionsidebox{\textbf{Reject}\\under-specified or semantically invalid} \\
+$\Downarrow$ & & \\
+\admissionmainbox{\textbf{Standards-aligned admission}\\emit JSON-LD, F* modules, diagnostics, and hashes}
+& & \\
+$\Downarrow$ & & \\
+\admissionmainbox{\textbf{Provider refinements}\\capacity, latency, policy, and reporting checks}
+& $\Rightarrow$ &
+\admissionsidebox{\textbf{Reject}\\provider-specific diagnostics} \\
+$\Downarrow$ & & \\
+\admissionmainbox{\textbf{Accepted intent}\\available for downstream orchestration} & &
+\end{tabular}
+\endgroup
+\caption{Online TMF921 intent-admission pipeline. The standards-aligned gate checks whether the request is actionable under the ontology-derived dependent types; provider refinements then check local admissibility constraints.}
+\label{fig:processing-pipeline}
+\end{figure}
 
 \section{Example Ontology Fragment and Refinement}
+To sh
+\textbf{Example request.} ``\textit{Provide a premium 5G broadcast service for the live event at Detroit Stadium on April 25, 2026 from 18:00 to 22:00 America/Detroit. Support up to 200 production devices. Keep uplink latency under 20 ms. Send hourly compliance updates and immediate alerts if service quality degrades. Do not impact emergency-service traffic.}''
 
-Consider a f
-
-The prototype is intentionally conservative. It focuses on the admission boundary rather than full TMF921 coverage or arbitrary LLM-based execution. The same structure can be reused in other high-trust domains by replacing the ontology subset and refinement predicates.
-
-\section{Admission Boundary and Validation}
-
-The TM921 shell treats every submission as a candidate intent rather than executable authority. Inputs are classified as canonical, normalizable, natural language, or ambiguous; admitted inputs are lowered into a canonical IR that records proof-relevant fields and source provenance. This typed interposition is aligned with prior work on typed IRs and safety gates for LLM-assisted systems \cite{firewall_nl,mtp,ciri}, and operationalizes complete mediation at the intent boundary \cite{security_principles}.
-
-
-
-
-
-and uses the TMF921 stack as a standards-aligned admissibility contract rather than merely a wire format \cite{tmf921_spec,tr292_tio}. Offline, a selected subset of the TM Forum intent ontology is projected into F* dependent types \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}; online, incoming requests at the TM921 boundary are normalized and, for the natural-language path, translated by an LLM into F* artifacts that must type-check against that ontology-derived layer before admission. Around that checked path, the system emits a canonical intent intermediate representation, normalized JSON-LD, generated F* modules, checker diagnostics, and hashes for traceability. For the current network case study, the shell also compares those typed checks against a repo-local JSON Schema baseline so that the value of proof-oriented validation is visible rather than assumed.
-
-
-Figure~\ref{fig:ontology-fragment} shows the compact TR290A/TR292D fragment used by the case study. The projection preserves only the subset needed at the admission boundary: intent structure, targets, expectations, and measurable quantities \cite{tr290a,tr292d}. Provider constraints are then layered on top of that standards-aligned core, consistent with TIO's modular model \cite{tr292_tio,tr292i}.
+Figure~\ref{fig:ontology-fragment} shows the compact ontology fragment used to interpret this request. The fragment is intentionally small: an intent has a target, a service class, a delivery window, measurable quantities, a reporting expectation, and a safety or security posture. For the live-broadcast scenario, these fields are enough to distinguish a vague request from an actionable intent without exposing the reader to the full ontology.
 
 \begin{figure}[t]
 \centering
@@ -108,7 +134,63 @@ Figure~\ref{fig:ontology-fragment} shows the compact TR290A/TR292D fragment used
 \label{fig:ontology-fragment}
 \end{figure}
 
-The admission model has two gates. The first asks whether the request is specific enough to count as an actionable intent at all: it must contain the proof-relevant structure, measurable quantities, and temporal context required by the selected TR290A/TR292D subset \cite{tr290a,tr292d}. The second applies provider-specific refinements such as capacity, latency, reporting, and traffic-protection constraints \cite{tr292_tio,tr292i}. This separation matters because it distinguishes requests that are not real intents from requests that are real intents but unsafe to enact.
+The first projection turns the standards-aligned fragment into common-core F* predicates. Listing~\ref{lst:common-core} elides record fields and helper definitions, but shows the important shape: the request must name a target and service, provide a complete window and reporting expectation, and attach positive measurable quantities.
+
+\begin{lstlisting}[style=fstar,caption={Simplified common-core F* excerpt derived from the ontology fragment.},label={lst:common-core}]
+let measurable (i:raw_tm_intent) : bool =
+  target_present (target_descriptor_of i) &&
+  service_present i.service_class &&
+  delivery_window_present (delivery_window_of i) &&
+  reporting_expectation_present
+    (reporting_expectation_of i) &&
+  required_metrics_present
+    (requires_auxiliary_metric i)
+    (metric_requirements_of i)
+
+let quantities_ok (i:raw_tm_intent) : bool =
+  all_quantities_positive (requires_auxiliary_metric i)
+    (primary_device_quantity_of i)
+    (auxiliary_endpoint_quantity_of i)
+    (max_latency_quantity_of i)
+    (reporting_interval_quantity_of i)
+
+let common_core_valid i =
+  measurable i && quantities_ok i
+\end{lstlisting}
+
+Provider checks are then layered on top of the common core. In the running live-broadcast example, Detroit Stadium resolves to the \texttt{LiveBroadcastGold} profile, which admits at most 250 production devices and requires a latency bound no tighter than 20 ms. The accepted scenario requests 200 devices, 20 ms uplink latency, hourly reporting, immediate degradation alerts, and no emergency-traffic preemption.
+
+\begin{lstlisting}[style=fstar,caption={Simplified provider refinement excerpt for live broadcast admission.},label={lst:provider-refinement}]
+type profile =
+  | LiveBroadcastSilver
+  | LiveBroadcastGold
+  | UnsupportedProfile
+
+let resolve_profile i =
+  match i.scenario_family,
+        (target_descriptor_of i).descriptor_name with
+  | BroadcastFamily, Some "Detroit Stadium" ->
+      LiveBroadcastGold
+  | BroadcastFamily, Some "Metro Arena" ->
+      LiveBroadcastSilver
+  | _ -> UnsupportedProfile
+
+let provider_valid p i =
+  common_core_valid i && profile_matches p i &&
+  capacity_ok p i && latency_ok p i &&
+  policy_ok i
+
+type provider_checked_intent (p:profile) (i:raw_tm_intent) =
+  v:raw_tm_intent{ v == i /\ provider_valid p v }
+\end{lstlisting}
+
+This witness structure localizes failures. A request missing a target, window, or quantity cannot construct the common-core witness; a request with excessive device count, an impossible latency claim, or public-safety preemption can pass the ontology-derived gate and still fail the provider witness. This is the separation between general intent validity and local provider admissibility.
+
+\section{Admission Boundary and Validation}
+
+The TM921 shell treats every submission as a candidate intent rather than executable authority. Inputs are classified as canonical, normalizable, natural language, or ambiguous; admitted inputs are lowered into a canonical IR that records proof-relevant fields and source provenance. This typed interposition is aligned with prior work on typed IRs and safety gates for LLM-assisted systems \cite{firewall_nl,mtp,ciri}, and operationalizes complete mediation at the intent boundary \cite{security_principles}. In the case study, the shell also compares the proof-oriented checks against a repo-local JSON Schema baseline so that the value of the typed admission lane is visible rather than assumed.
+
+As illustrated in Fig.~\ref{fig:ontology-fragment} and Listings~\ref{lst:common-core}--\ref{lst:provider-refinement}, the admission model has two gates. The first asks whether the request is specific enough to count as an actionable intent at all: it must contain the proof-relevant structure, measurable quantities, and temporal context required by the selected TR290A/TR292D subset \cite{tr290a,tr292d}. The second applies provider-specific refinements such as capacity, latency, reporting, and traffic-protection constraints \cite{tr292_tio,tr292i}. This separation matters because it distinguishes requests that are not real intents from requests that are real intents but unsafe to enact.
 
 The shell also retains sidecar evidence so that acceptance and rejection remain auditable \cite{security_principles,ciri,confucius}. This evidence includes:
 \begin{itemize}
