@@ -1,0 +1,6 @@
+PWD /Users/Faisal.Waris1/repos/TMForumDemo
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf.cnf
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/web2c/texmf.cnf
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-var/web2c/pdftex/pdflatex.fmt
+INPUT docs/icnp2026_submission/icnp2026_submission.tex
+OUTPUT icnp2026_submission.log

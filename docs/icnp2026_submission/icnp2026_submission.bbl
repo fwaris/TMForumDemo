@@ -121,6 +121,20 @@ L.~de~Moura, S.~Kong, J.~Avigad, F.~van Doorn, and J.~von Raumer, ``The lean
   2026. [Online]. Available: \url{https://openai.com/codex/}
 \BIBentrySTDinterwordspacing
 
+\bibitem{github_copilot_features}
+\BIBentryALTinterwordspacing
+{GitHub}, ``{GitHub Copilot Features},'' 2026, gitHub Docs; accessed April 23,
+  2026. [Online]. Available:
+  \url{https://docs.github.com/en/copilot/get-started/features}
+\BIBentrySTDinterwordspacing
+
+\bibitem{rlvr_grpo}
+\BIBentryALTinterwordspacing
+Y.~Mroueh, ``{Reinforcement Learning with Verifiable Rewards: GRPO's Effective
+  Loss, Dynamics, and Success Amplification},'' arXiv:2503.06639, 2025.
+  [Online]. Available: \url{https://arxiv.org/abs/2503.06639}
+\BIBentrySTDinterwordspacing
+
 \bibitem{imo_official}
 \BIBentryALTinterwordspacing
 {International Mathematical Olympiad}, ``{International Mathematical
@@ -173,13 +187,6 @@ M.~Kim and S.-Y. Yun, ``{Process-Verified Reinforcement Learning for Theorem
 ------, ``{BrowseComp: a Benchmark for Browsing Agents},'' 2025, published
   April 10, 2025; accessed April 23, 2026. [Online]. Available:
   \url{https://openai.com/index/browsecomp/}
-\BIBentrySTDinterwordspacing
-
-\bibitem{jsonld11}
-\BIBentryALTinterwordspacing
-G.~Kellogg, P.-A. Champin, and D.~Longley, ``{JSON-LD 1.1: A JSON-based
-  Serialization for Linked Data},'' W3C Recommendation, 2020. [Online].
-  Available: \url{https://www.w3.org/TR/json-ld11/}
 \BIBentrySTDinterwordspacing
 
 \bibitem{mtp}
