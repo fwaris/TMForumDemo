@@ -42,6 +42,11 @@ bld/
 Generated\ Files/
 Tmf921.IntentManagement.Api/FStarDemo/generated/
 
+# Local runtime secrets
+.env
+.env.*
+!.env.example
+
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*

@@ -1,0 +1,14 @@
+services:
+  tmf921-intent-api:
+    image: tmf921-intent-api
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUNTIME_PLATFORM: linux/amd64
+    ports:
+      - "8080:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env or the shell before running docker compose up}
+      IntentLlm__Model: ${INTENT_LLM_MODEL:-gpt-5.4}

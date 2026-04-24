@@ -2,6 +2,72 @@
 
 This project is an F# ASP.NET Core shell implementation of the TM Forum **TMF921 Intent Management API**.
 
+**Demo URL after startup:** `http://localhost:8080/demo/`
+
+## Try The Demo First
+
+The fastest way to test the application is the browser demo. Use Docker Compose
+when you want the demo to call OpenAI for live natural-language normalization.
+
+Create a local `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set `OPENAI_API_KEY` to your real key. Then start the app:
+
+```bash
+docker compose up --build
+```
+
+You can also run with a shell environment variable instead of `.env`:
+
+```bash
+docker build -t tmf921-intent-api .
+docker run --rm -p 8080:8080 -e OPENAI_API_KEY="$OPENAI_API_KEY" tmf921-intent-api
+```
+
+Open the demo UI:
+
+```text
+http://localhost:8080/demo/
+```
+
+If you only want the checked-in scenario path, the app can still start without a
+key, but edited or ad-hoc natural-language demo inputs need `OPENAI_API_KEY`.
+
+Useful demo smoke checks:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/tmf-api/intentManagement/v5/demo/featured-scenarios
+curl http://localhost:8080/tmf-api/intentManagement/v5/demo/scenarios/broadcast_success_01
+```
+
+To inspect every demo scenario result from the API:
+
+```bash
+curl http://localhost:8080/tmf-api/intentManagement/v5/demo/scenarios/run
+```
+
+The demo validation API is:
+
+```text
+POST /tmf-api/intentManagement/v5/demo/validate
+```
+
+The browser page uses that endpoint after loading scenarios from:
+
+```text
+GET /tmf-api/intentManagement/v5/demo/featured-scenarios
+```
+
+If you run the app locally with `dotnet run`, use `http://localhost:5001/demo/`
+instead.
+
+## API Surface
+
 Implemented for v1:
 
 - `GET /health`
@@ -28,13 +94,19 @@ What this shell does not do yet:
 - intent specification/report resources
 - hub/listener notifications
 - persistence
-- LLM integration beyond heuristic NL-to-IR generation
+- production-grade LLM orchestration beyond demo NL-to-IR normalization
 - advanced ontology coverage beyond the common-core shell subset
 
-## Run
+## Run Locally
 
 ```bash
 dotnet run --project Tmf921.IntentManagement.Api/Tmf921.IntentManagement.Api.fsproj
+```
+
+Then open:
+
+```text
+http://localhost:5001/demo/
 ```
 
 ## Docker
@@ -43,17 +115,26 @@ Build and run the container:
 
 ```bash
 docker build -t tmf921-intent-api .
-docker run --rm -p 8080:8080 tmf921-intent-api
+docker run --rm -p 8080:8080 -e OPENAI_API_KEY="$OPENAI_API_KEY" tmf921-intent-api
 ```
 
 The image uses Microsoft's ASP.NET runtime base image and installs F* `2025.12.15`.
 It defaults to `linux/amd64` because that is the Linux binary published by F*.
-The Docker demo uses checked-in scenario fixtures by default, so `/demo` can run
-without an API key. The Dockerfile does not bake in API keys. Pass runtime
-secrets with environment variables when live LLM calls are needed:
+The Docker demo uses checked-in scenario fixtures by default, so `/demo/` can
+start without an API key, but live demo normalization requires one. The
+Dockerfile does not bake in API keys. Pass runtime secrets with environment
+variables or Compose when live LLM calls are needed:
 
 ```bash
 docker run --rm -p 8080:8080 -e OPENAI_API_KEY="$OPENAI_API_KEY" tmf921-intent-api
+```
+
+Or use Compose, which reads `OPENAI_API_KEY` from `.env` or your shell:
+
+```bash
+cp .env.example .env
+# edit .env and set OPENAI_API_KEY
+docker compose up --build
 ```
 
 If your network uses TLS inspection, pass your local CA bundle as a build secret:
@@ -66,6 +147,7 @@ Verify the container:
 
 ```bash
 curl http://localhost:8080/health
+curl http://localhost:8080/tmf-api/intentManagement/v5/demo/featured-scenarios
 docker run --rm --entrypoint fstar.exe tmf921-intent-api --version
 ```
 
@@ -115,4 +197,4 @@ The shell-processing record includes:
 
 ## Sequence Diagram
 
-See [Intent submission sequence](../docs/intent_submission_sequence.md) for the current create-path flow.
+See [Intent submission sequence](docs/intent_submission_sequence.md) for the current create-path flow.
