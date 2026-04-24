@@ -278,7 +278,7 @@ module RawIntentGenerationValidation =
           Attempts = attempts |> Seq.toList
           Diagnostics = finalDiagnostics }
 
-type RawIntentGenerator(chatClient: IChatClient, options: IntentLlmOptions) =
+type RawIntentGenerator(chatClient: IChatClient option, options: IntentLlmOptions) =
     let promptVersion = "2026-04-23.fstar-intent.v2"
 
     let diagnostic code message details =
@@ -516,157 +516,179 @@ Reminder:
                 | Some result ->
                     return result
                 | None ->
-                    let attempts = ResizeArray<LlmParseAttempt>()
-                    let mutable priorIssues = context.RepairIssues
-                    let mutable finalEnvelope = None
-                    let mutable finalPromptText = None
-                    let mutable finalResponseText = None
-                    let mutable finalDiagnostics = []
-                    let mutable selectedOutcome = "exhausted"
+                    match chatClient with
+                    | None ->
+                        let issues =
+                            [ diagnostic
+                                "OPENAI_API_KEY_MISSING"
+                                "Live natural-language normalization requires OPENAI_API_KEY at runtime."
+                                None ]
+                        let attempt =
+                            { Attempt = 1
+                              Source = "configuration"
+                              Outcome = "missing_api_key"
+                              ResponseId = None
+                              FinishReason = None
+                              Issues = issues }
 
-                    for attemptNumber in 1 .. effectiveOptions.MaxAttempts do
-                        if finalEnvelope.IsNone && finalDiagnostics.IsEmpty then
-                            let promptText =
-                                [ buildBasePrompt ()
-                                  buildUserPrompt text priorIssues ]
-                                |> String.concat "\n\n---\n\n"
+                        return
+                            { Envelope = None
+                              Metadata = metadata "missing_api_key" false context.ScenarioId [ attempt ]
+                              PromptText = None
+                              RawResponseText = None
+                              Diagnostics = issues }
+                    | Some chatClient ->
+                        let attempts = ResizeArray<LlmParseAttempt>()
+                        let mutable priorIssues = context.RepairIssues
+                        let mutable finalEnvelope = None
+                        let mutable finalPromptText = None
+                        let mutable finalResponseText = None
+                        let mutable finalDiagnostics = []
+                        let mutable selectedOutcome = "exhausted"
 
-                            let messages =
-                                [ ChatMessage(ChatRole.System, buildBasePrompt ())
-                                  ChatMessage(ChatRole.User, buildUserPrompt text priorIssues) ]
+                        for attemptNumber in 1 .. effectiveOptions.MaxAttempts do
+                            if finalEnvelope.IsNone && finalDiagnostics.IsEmpty then
+                                let promptText =
+                                    [ buildBasePrompt ()
+                                      buildUserPrompt text priorIssues ]
+                                    |> String.concat "\n\n---\n\n"
 
-                            finalPromptText <- Some promptText
+                                let messages =
+                                    [ ChatMessage(ChatRole.System, buildBasePrompt ())
+                                      ChatMessage(ChatRole.User, buildUserPrompt text priorIssues) ]
 
-                            try
-                                use timeout = new CancellationTokenSource(TimeSpan.FromSeconds(float effectiveOptions.TimeoutSeconds))
-                                use linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token)
+                                finalPromptText <- Some promptText
 
-                                let! response =
-                                    chatClient.GetResponseAsync<FStarIntentModuleEnvelope>(
-                                        messages,
-                                        llmStructuredOutputSerializerOptions,
-                                        buildChatOptions (),
-                                        Nullable true,
-                                        linked.Token)
+                                try
+                                    use timeout = new CancellationTokenSource(TimeSpan.FromSeconds(float effectiveOptions.TimeoutSeconds))
+                                    use linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token)
 
-                                let rawResponseText =
-                                    if String.IsNullOrWhiteSpace response.Text then
-                                        trySerializeRawRepresentation response.RawRepresentation
+                                    let! response =
+                                        chatClient.GetResponseAsync<FStarIntentModuleEnvelope>(
+                                            messages,
+                                            llmStructuredOutputSerializerOptions,
+                                            buildChatOptions (),
+                                            Nullable true,
+                                            linked.Token)
+
+                                    let rawResponseText =
+                                        if String.IsNullOrWhiteSpace response.Text then
+                                            trySerializeRawRepresentation response.RawRepresentation
+                                        else
+                                            Some response.Text
+
+                                    finalResponseText <- rawResponseText
+
+                                    let finishReason =
+                                        if response.FinishReason.HasValue then
+                                            Some(string response.FinishReason.Value)
+                                        else
+                                            None
+
+                                    let responseId = response.ResponseId |> Option.ofObj
+                                    let mutable parsed = Unchecked.defaultof<FStarIntentModuleEnvelope>
+
+                                    if response.TryGetResult(&parsed) then
+                                        let normalizedEnvelope, validationIssues, _ =
+                                            RawIntentGenerationValidation.validateEnvelope parsed
+
+                                        let attempt =
+                                            { Attempt = attemptNumber
+                                              Source = "live_model"
+                                              Outcome =
+                                                if validationIssues.IsEmpty then
+                                                    normalizedEnvelope.Status
+                                                else
+                                                    "repair_required"
+                                              ResponseId = responseId
+                                              FinishReason = finishReason
+                                              Issues = validationIssues }
+
+                                        attempts.Add attempt
+
+                                        if validationIssues.IsEmpty then
+                                            selectedOutcome <- normalizedEnvelope.Status
+                                            finalEnvelope <- Some normalizedEnvelope
+                                            finalDiagnostics <-
+                                                if normalizedEnvelope.Status = "clarification_required" then
+                                                    normalizedEnvelope.Issues
+                                                else
+                                                    []
+                                        else
+                                            priorIssues <- validationIssues
+
+                                            if attemptNumber = effectiveOptions.MaxAttempts then
+                                                selectedOutcome <- "repair_exhausted"
+                                                finalDiagnostics <- validationIssues
                                     else
-                                        Some response.Text
+                                        let parseIssues =
+                                            match maybeRefusal rawResponseText with
+                                            | Some refusal -> [ refusal ]
+                                            | None ->
+                                                [ diagnostic
+                                                    "SCHEMA_MISMATCH"
+                                                    "The model response could not be parsed as structured output."
+                                                    rawResponseText ]
 
-                                finalResponseText <- rawResponseText
+                                        attempts.Add
+                                            { Attempt = attemptNumber
+                                              Source = "live_model"
+                                              Outcome = parseIssues.Head.Code.ToLowerInvariant()
+                                              ResponseId = responseId
+                                              FinishReason = finishReason
+                                              Issues = parseIssues }
 
-                                let finishReason =
-                                    if response.FinishReason.HasValue then
-                                        Some(string response.FinishReason.Value)
-                                    else
-                                        None
-
-                                let responseId = response.ResponseId |> Option.ofObj
-                                let mutable parsed = Unchecked.defaultof<FStarIntentModuleEnvelope>
-
-                                if response.TryGetResult(&parsed) then
-                                    let normalizedEnvelope, validationIssues, _ =
-                                        RawIntentGenerationValidation.validateEnvelope parsed
-
-                                    let attempt =
-                                        { Attempt = attemptNumber
-                                          Source = "live_model"
-                                          Outcome =
-                                            if validationIssues.IsEmpty then
-                                                normalizedEnvelope.Status
-                                            else
-                                                "repair_required"
-                                          ResponseId = responseId
-                                          FinishReason = finishReason
-                                          Issues = validationIssues }
-
-                                    attempts.Add attempt
-
-                                    if validationIssues.IsEmpty then
-                                        selectedOutcome <- normalizedEnvelope.Status
-                                        finalEnvelope <- Some normalizedEnvelope
-                                        finalDiagnostics <-
-                                            if normalizedEnvelope.Status = "clarification_required" then
-                                                normalizedEnvelope.Issues
-                                            else
-                                                []
-                                    else
-                                        priorIssues <- validationIssues
+                                        priorIssues <- parseIssues
 
                                         if attemptNumber = effectiveOptions.MaxAttempts then
-                                            selectedOutcome <- "repair_exhausted"
-                                            finalDiagnostics <- validationIssues
-                                else
-                                    let parseIssues =
-                                        match maybeRefusal rawResponseText with
-                                        | Some refusal -> [ refusal ]
-                                        | None ->
-                                            [ diagnostic
-                                                "SCHEMA_MISMATCH"
-                                                "The model response could not be parsed as structured output."
-                                                rawResponseText ]
+                                            selectedOutcome <- parseIssues.Head.Code.ToLowerInvariant()
+                                            finalDiagnostics <- parseIssues
+                                with
+                                | :? OperationCanceledException as ex when not cancellationToken.IsCancellationRequested ->
+                                    let issues =
+                                        [ diagnostic
+                                            "LLM_TIMEOUT"
+                                            $"The LLM request exceeded the configured timeout of {effectiveOptions.TimeoutSeconds} seconds."
+                                            (Some(ex.ToString())) ]
 
                                     attempts.Add
                                         { Attempt = attemptNumber
                                           Source = "live_model"
-                                          Outcome = parseIssues.Head.Code.ToLowerInvariant()
-                                          ResponseId = responseId
-                                          FinishReason = finishReason
-                                          Issues = parseIssues }
+                                          Outcome = "timeout"
+                                          ResponseId = None
+                                          FinishReason = None
+                                          Issues = issues }
 
-                                    priorIssues <- parseIssues
+                                    priorIssues <- issues
 
                                     if attemptNumber = effectiveOptions.MaxAttempts then
-                                        selectedOutcome <- parseIssues.Head.Code.ToLowerInvariant()
-                                        finalDiagnostics <- parseIssues
-                            with
-                            | :? OperationCanceledException as ex when not cancellationToken.IsCancellationRequested ->
-                                let issues =
-                                    [ diagnostic
-                                        "LLM_TIMEOUT"
-                                        $"The LLM request exceeded the configured timeout of {effectiveOptions.TimeoutSeconds} seconds."
-                                        (Some(ex.ToString())) ]
+                                        selectedOutcome <- "timeout"
+                                        finalDiagnostics <- issues
+                                | ex ->
+                                    let issues =
+                                        [ diagnostic
+                                            "LLM_TRANSPORT_ERROR"
+                                            "The LLM request failed before a structured result was returned."
+                                            (Some(ex.ToString())) ]
 
-                                attempts.Add
-                                    { Attempt = attemptNumber
-                                      Source = "live_model"
-                                      Outcome = "timeout"
-                                      ResponseId = None
-                                      FinishReason = None
-                                      Issues = issues }
+                                    attempts.Add
+                                        { Attempt = attemptNumber
+                                          Source = "live_model"
+                                          Outcome = "transport_error"
+                                          ResponseId = None
+                                          FinishReason = None
+                                          Issues = issues }
 
-                                priorIssues <- issues
+                                    priorIssues <- issues
 
-                                if attemptNumber = effectiveOptions.MaxAttempts then
-                                    selectedOutcome <- "timeout"
-                                    finalDiagnostics <- issues
-                            | ex ->
-                                let issues =
-                                    [ diagnostic
-                                        "LLM_TRANSPORT_ERROR"
-                                        "The LLM request failed before a structured result was returned."
-                                        (Some(ex.ToString())) ]
+                                    if attemptNumber = effectiveOptions.MaxAttempts then
+                                        selectedOutcome <- "transport_error"
+                                        finalDiagnostics <- issues
 
-                                attempts.Add
-                                    { Attempt = attemptNumber
-                                      Source = "live_model"
-                                      Outcome = "transport_error"
-                                      ResponseId = None
-                                      FinishReason = None
-                                      Issues = issues }
-
-                                priorIssues <- issues
-
-                                if attemptNumber = effectiveOptions.MaxAttempts then
-                                    selectedOutcome <- "transport_error"
-                                    finalDiagnostics <- issues
-
-                    return
-                        { Envelope = finalEnvelope
-                          Metadata = metadata selectedOutcome false context.ScenarioId (attempts |> Seq.toList)
-                          PromptText = finalPromptText
-                          RawResponseText = finalResponseText
-                          Diagnostics = finalDiagnostics }
+                        return
+                            { Envelope = finalEnvelope
+                              Metadata = metadata selectedOutcome false context.ScenarioId (attempts |> Seq.toList)
+                              PromptText = finalPromptText
+                              RawResponseText = finalResponseText
+                              Diagnostics = finalDiagnostics }
             }

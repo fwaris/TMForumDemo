@@ -24,6 +24,12 @@ module Program =
         | true, parsed -> Some parsed
         | _ -> None
 
+    let private tryNonEmpty (value: string) =
+        if String.IsNullOrWhiteSpace value then
+            None
+        else
+            Some value
+
     let private tryGetArgValue (args: string array) (name: string) =
         args
         |> Array.tryFindIndex ((=) name)
@@ -72,10 +78,14 @@ module Program =
     let private resolveOpenAiApiKey (configuration: IConfiguration) =
         configuration["OPENAI_API_KEY"]
         |> Option.ofObj
-        |> Option.defaultValue (Environment.GetEnvironmentVariable("OPENAI_API_KEY"))
+        |> Option.bind tryNonEmpty
+        |> Option.orElseWith (fun () ->
+            Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+            |> Option.ofObj
+            |> Option.bind tryNonEmpty)
 
-    let private createChatClient (model: string) (apiKey: string) =
-        ResponsesClient(model, apiKey).AsIChatClient()
+    let private createChatClient (model: string) (apiKey: string option) =
+        apiKey |> Option.map (fun key -> ResponsesClient(model, key).AsIChatClient())
 
     [<EntryPoint>]
     let main args =
@@ -151,10 +161,10 @@ module Program =
             |> ignore
             builder.Services.AddSingleton(intentLlmOptions) |> ignore
             builder.Services
-                .AddChatClient(fun _ ->
-                    createChatClient intentLlmOptions.Model openAiApiKey)
+                .AddSingleton<IRawIntentGenerator>(fun _ ->
+                    RawIntentGenerator(createChatClient intentLlmOptions.Model openAiApiKey, intentLlmOptions)
+                    :> IRawIntentGenerator)
             |> ignore
-            builder.Services.AddSingleton<IRawIntentGenerator, RawIntentGenerator>() |> ignore
             builder.Services.AddSingleton<IIntentStore, IntentStore>() |> ignore
             builder.Services.AddSingleton<ShellStore>() |> ignore
             builder.Services.AddEndpointsApiExplorer() |> ignore

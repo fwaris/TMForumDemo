@@ -687,7 +687,7 @@ module DemoScenarios =
         restrictedFromDemoIntent intent |> IntentAdmission.providerFailedWitness
 
     let private demoProjectDir () =
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."))
+        Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api")
 
     let private demoSchemaPath family =
         let fileName =
@@ -710,7 +710,10 @@ module DemoScenarios =
         System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Json.Schema.JsonSchema>>()
 
     let private jsonBaselineSchema family =
-        let key = family |> Option.defaultValue "Broadcast"
+        let key =
+            match family with
+            | Some "CriticalService" -> "CriticalService"
+            | _ -> "Broadcast"
 
         jsonBaselineSchemas.GetOrAdd(
             key,
@@ -1207,6 +1210,47 @@ let admission_token_for_demo : admission_token selected_profile =
 
     let private distinctIssues (issues: ValidationIssue list) =
         issues |> List.distinctBy (fun value -> value.Code, value.Message)
+
+    let private generationResultFromReferenceIntent (definition: DemoScenarioDefinition) intent =
+        let moduleName = $"DemoIntent_{sanitizeModuleSegment definition.Id}"
+        let moduleText = IntentAdmission.buildCandidateModule moduleName intent
+        let envelope =
+            { Status = "parsed"
+              ModuleText = Some moduleText
+              Issues = [] }
+        let attempt =
+            { Attempt = 1
+              Source = "scenario_reference"
+              Outcome = "parsed"
+              ResponseId = None
+              FinishReason = None
+              Issues = [] }
+
+        { Envelope = Some envelope
+          Metadata =
+            { Provider = Some "scenario_reference"
+              Model = Some "checked-in-reference-intent"
+              PromptVersion = Some "demo-reference"
+              SelectedOutcome = Some "parsed"
+              UsedFixture = true
+              FixtureId = Some definition.Id
+              Attempts = [ attempt ] }
+          PromptText = None
+          RawResponseText = Some moduleText
+          Diagnostics = [] }
+
+    let private generatorForDefinition
+        (rawIntentGenerator: IRawIntentGenerator)
+        (definitionOption: DemoScenarioDefinition option) =
+        match definitionOption with
+        | Some definition ->
+            match definition.ReferenceIntent with
+            | Some intent ->
+                { new IRawIntentGenerator with
+                    member _.GenerateIntentModuleAsync(_, _, _) =
+                        Task.FromResult(generationResultFromReferenceIntent definition intent) }
+            | None -> rawIntentGenerator
+        | None -> rawIntentGenerator
 
     let private successfulExpectationChecks =
         { JsonBaselineMatches = true
@@ -1754,9 +1798,11 @@ let admission_token_for_demo : admission_token selected_profile =
         (text: string) =
         task {
             let intentId = $"demo-{Guid.NewGuid():N}"
+            let generator = generatorForDefinition rawIntentGenerator definitionOption
+
             let! outcome =
                 IntentPipeline.processIntentWithContextAsync
-                    rawIntentGenerator
+                    generator
                     RawIntentGenerationContext.Live
                     intentId
                     (buildNaturalLanguageRequest text)

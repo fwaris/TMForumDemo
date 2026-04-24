@@ -23,7 +23,12 @@ module ShellJson =
     let nowText () = DateTimeOffset.UtcNow.ToString("O")
 
     let repoRoot () =
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."))
+        let configuredRoot = Environment.GetEnvironmentVariable("TMF921_REPO_ROOT")
+
+        if String.IsNullOrWhiteSpace configuredRoot then
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."))
+        else
+            Path.GetFullPath configuredRoot
 
     let configureBaseSerializerOptions (options: JsonSerializerOptions) =
         options.DefaultIgnoreCondition <- JsonIgnoreCondition.WhenWritingNull

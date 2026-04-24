@@ -37,6 +37,38 @@ What this shell does not do yet:
 dotnet run --project Tmf921.IntentManagement.Api/Tmf921.IntentManagement.Api.fsproj
 ```
 
+## Docker
+
+Build and run the container:
+
+```bash
+docker build -t tmf921-intent-api .
+docker run --rm -p 8080:8080 tmf921-intent-api
+```
+
+The image uses Microsoft's ASP.NET runtime base image and installs F* `2025.12.15`.
+It defaults to `linux/amd64` because that is the Linux binary published by F*.
+The Docker demo uses checked-in scenario fixtures by default, so `/demo` can run
+without an API key. The Dockerfile does not bake in API keys. Pass runtime
+secrets with environment variables when live LLM calls are needed:
+
+```bash
+docker run --rm -p 8080:8080 -e OPENAI_API_KEY="$OPENAI_API_KEY" tmf921-intent-api
+```
+
+If your network uses TLS inspection, pass your local CA bundle as a build secret:
+
+```bash
+docker build --secret id=ca_bundle,src="$SSL_CERT_FILE" -t tmf921-intent-api .
+```
+
+Verify the container:
+
+```bash
+curl http://localhost:8080/health
+docker run --rm --entrypoint fstar.exe tmf921-intent-api --version
+```
+
 ## Sample create request
 
 ```bash
