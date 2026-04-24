@@ -136,7 +136,7 @@ let mk_measurable
   i
 
 type quantity_checked_intent (i:raw_tm_intent) =
-  v:raw_tm_intent{ v == i /\ common_core_valid v }
+  v:raw_tm_intent{ v == i /\ measurable v /\ quantities_ok v }
 
 let mk_quantity_checked
   (i:raw_tm_intent{ common_core_valid i })

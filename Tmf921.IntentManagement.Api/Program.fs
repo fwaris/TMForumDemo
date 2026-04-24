@@ -114,11 +114,32 @@ module Program =
             let replayPath =
                 tryGetArgValue args "--run-benchmark-replay"
                 |> Option.orElseWith (fun () ->
-                    Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "DemoFixtures", "BenchmarkRuns")
+                    Path.Combine(repoRoot (), "artifacts", "benchmark-runs")
                     |> tryGetLatestDirectory)
-                |> Option.defaultValue (Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "DemoFixtures", "BenchmarkRuns"))
+                |> Option.defaultValue (Path.Combine(repoRoot (), "artifacts", "benchmark-runs"))
 
             BenchmarkRunner.replay replayPath
+            |> fun results -> JsonSerializer.Serialize(results, options)
+            |> Console.WriteLine
+            exitCode
+        else if args |> Array.exists (fun arg -> arg = "--run-synthetic-correctness-eval") then
+            let options = JsonSerializerOptions(serializerOptions)
+            options.WriteIndented <- true
+            let outputDirectory = tryGetArgValue args "--benchmark-output-dir" |> Option.map Path.GetFullPath
+            let repetitionCount =
+                tryGetArgValue args "--benchmark-repetitions"
+                |> Option.bind tryParseInt
+                |> Option.defaultValue 30
+            let expressionCount =
+                tryGetArgValue args "--benchmark-expression-count"
+                |> Option.bind tryParseInt
+                |> Option.defaultValue 10
+            let rawIntentGenerator =
+                RawIntentGenerator(createChatClient intentLlmOptions.Model openAiApiKey, intentLlmOptions)
+                :> IRawIntentGenerator
+
+            BenchmarkRunner.runSyntheticCorrectnessAsync rawIntentGenerator outputDirectory repetitionCount expressionCount
+            |> fun task -> task.GetAwaiter().GetResult()
             |> fun results -> JsonSerializer.Serialize(results, options)
             |> Console.WriteLine
             exitCode

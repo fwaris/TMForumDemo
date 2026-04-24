@@ -64,13 +64,6 @@ K.~Zhang, Z.~Su, P.-Y. Chen, E.~Bertino, X.~Zhang, and N.~Li, ``{LLM Agents
   \url{https://www.tmforum.org/open-digital-architecture/open-apis/intent-management-api-TMF921/v5.0}
 \BIBentrySTDinterwordspacing
 
-\bibitem{tr290a}
-------, ``{TR290A Intent Common Model Part 1: Intent Expression v3.6.0},''
-  2024, technical report.
-
-\bibitem{tr292d}
-------, ``{TR292D Quantity Ontology v3.6.0},'' 2024, technical report.
-
 \bibitem{fstar_site}
 \BIBentryALTinterwordspacing
 {The F* Project}, ``{F*: A Proof-Oriented Programming Language},'' 2026,
@@ -84,6 +77,20 @@ N.~Swamy, C.~Hritcu, C.~Keller, A.~Rastogi, A.~Delignat-Lavaud, S.~Forest,
   S.~Zanella-Beguelin, ``Dependent types and multi-monadic effects in {F*},''
   in \emph{Proceedings of POPL 2016}, 2016. [Online]. Available:
   \url{https://fstar-lang.org/papers/mumon/}
+\BIBentrySTDinterwordspacing
+
+\bibitem{tr290a}
+{TM Forum}, ``{TR290A Intent Common Model Part 1: Intent Expression v3.6.0},''
+  2024, technical report.
+
+\bibitem{tr292d}
+------, ``{TR292D Quantity Ontology v3.6.0},'' 2024, technical report.
+
+\bibitem{jsonld11}
+\BIBentryALTinterwordspacing
+G.~Kellogg, P.-A. Champin, and D.~Longley, ``{JSON-LD 1.1: A JSON-based
+  Serialization for Linked Data},'' W3C Recommendation, 2020. [Online].
+  Available: \url{https://www.w3.org/TR/json-ld11/}
 \BIBentrySTDinterwordspacing
 
 \bibitem{tmf921_spec}
@@ -189,22 +196,19 @@ M.~Kim and S.-Y. Yun, ``{Process-Verified Reinforcement Learning for Theorem
   \url{https://openai.com/index/browsecomp/}
 \BIBentrySTDinterwordspacing
 
+\bibitem{tmforumdemo_repo}
+\BIBentryALTinterwordspacing
+{TMForumDemo Contributors}, ``{TMForumDemo Project Repository},'' 2026,
+  accessed April 24, 2026. [Online]. Available:
+  \url{https://github.com/fwaris/TMForumDemo}
+\BIBentrySTDinterwordspacing
+
 \bibitem{mtp}
 \BIBentryALTinterwordspacing
 J.~Mars, Y.~Kang, J.~L. Dantanarayana, K.~Sivasothynathan, C.~Clarke, B.~Li,
   K.~Flautner, and L.~Tang, ``{Meaning-Typed Programming: Language-level
   Abstractions and Runtime for GenAI Applications},'' arXiv:2405.08965, 2024.
   [Online]. Available: \url{https://arxiv.org/abs/2405.08965}
-\BIBentrySTDinterwordspacing
-
-\bibitem{tr292i}
-{TM Forum}, ``{TR292I Security Ontology v3.8.0},'' 2026, technical report.
-
-\bibitem{fsharp}
-\BIBentryALTinterwordspacing
-{Microsoft}, ``{What is F\#?}'' 2026, accessed April 22, 2026. [Online].
-  Available:
-  \url{https://learn.microsoft.com/en-us/dotnet/fsharp/what-is-fsharp}
 \BIBentrySTDinterwordspacing
 
 \end{thebibliography}

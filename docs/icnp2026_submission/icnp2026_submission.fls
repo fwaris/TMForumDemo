@@ -172,6 +172,12 @@ INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/publi
 INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam7.tfm
 INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm10.tfm
 INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/public/amsfonts/symbols/msbm7.tfm
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/adobe/courier/pcrrc7t.tfm
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/adobe/courier/pcrr7t.tfm
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/vf/adobe/courier/pcrrc7t.vf
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/tfm/adobe/courier/pcrr8r.tfm
+INPUT /Users/Faisal.Waris1/.local/texlive-review/2026/texmf-dist/fonts/vf/adobe/courier/pcrr7t.vf
 INPUT ./icnp2026_submission.bbl
 INPUT ./icnp2026_submission.bbl
 INPUT icnp2026_submission.bbl

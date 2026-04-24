@@ -63,6 +63,10 @@ let quantities_ok (i:tm_intent) : bool =
   has_positive_nat i.max_uplink_latency_ms &&
   has_positive_nat i.reporting_interval_minutes
 
+let common_core_valid (i:tm_intent) : bool =
+  measurable i &&
+  quantities_ok i
+
 let window_ok (i:tm_intent) : bool =
   match i.start_hour, i.end_hour with
   | Some s, Some e -> s < e
@@ -127,15 +131,6 @@ let policy_ok (i:tm_intent) : bool =
   i.preserve_emergency_traffic &&
   not i.request_public_safety_preemption
 
-let provider_valid (p:profile) (i:tm_intent) : bool =
-  measurable i &&
-  quantities_ok i &&
-  window_ok i &&
-  profile_matches p i &&
-  capacity_ok p i &&
-  latency_ok p i &&
-  policy_ok i
-
 type measurable_intent (i:tm_intent) =
   v:tm_intent{ v == i /\ measurable v }
 
@@ -148,60 +143,60 @@ type quantity_checked_intent (i:tm_intent) =
   v:tm_intent{ v == i /\ measurable v /\ quantities_ok v }
 
 let mk_quantity_checked
-  (i:tm_intent{ measurable i /\ quantities_ok i })
+  (i:tm_intent{ common_core_valid i })
   : quantity_checked_intent i =
   i
 
 type window_checked_intent (i:tm_intent) =
-  v:tm_intent{ v == i /\ measurable v /\ quantities_ok v /\ window_ok v }
+  v:tm_intent{ v == i /\ common_core_valid v /\ window_ok v }
 
 let mk_window_checked
-  (i:tm_intent{ measurable i /\ quantities_ok i /\ window_ok i })
+  (i:tm_intent{ common_core_valid i /\ window_ok i })
   : window_checked_intent i =
   i
 
 type profiled_intent (p:profile) (i:tm_intent) =
-  v:tm_intent{ v == i /\ measurable v /\ quantities_ok v /\ window_ok v /\ profile_matches p v }
+  v:tm_intent{ v == i /\ common_core_valid v /\ window_ok v /\ profile_matches p v }
 
 let mk_profiled
   (p:profile)
-  (i:tm_intent{ measurable i /\ quantities_ok i /\ window_ok i /\ profile_matches p i })
+  (i:tm_intent{ common_core_valid i /\ window_ok i /\ profile_matches p i })
   : profiled_intent p i =
   i
 
 type capacity_checked_intent (p:profile) (i:tm_intent) =
-  v:tm_intent{ v == i /\ measurable v /\ quantities_ok v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v }
+  v:tm_intent{ v == i /\ common_core_valid v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v }
 
 let mk_capacity_checked
   (p:profile)
-  (i:tm_intent{ measurable i /\ quantities_ok i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i })
+  (i:tm_intent{ common_core_valid i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i })
   : capacity_checked_intent p i =
   i
 
 type latency_checked_intent (p:profile) (i:tm_intent) =
-  v:tm_intent{ v == i /\ measurable v /\ quantities_ok v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v /\ latency_ok p v }
+  v:tm_intent{ v == i /\ common_core_valid v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v /\ latency_ok p v }
 
 let mk_latency_checked
   (p:profile)
-  (i:tm_intent{ measurable i /\ quantities_ok i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i /\ latency_ok p i })
+  (i:tm_intent{ common_core_valid i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i /\ latency_ok p i })
   : latency_checked_intent p i =
   i
 
 type policy_checked_intent (p:profile) (i:tm_intent) =
-  v:tm_intent{ v == i /\ measurable v /\ quantities_ok v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v /\ latency_ok p v /\ policy_ok v }
+  v:tm_intent{ v == i /\ common_core_valid v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v /\ latency_ok p v /\ policy_ok v }
 
 let mk_policy_checked
   (p:profile)
-  (i:tm_intent{ measurable i /\ quantities_ok i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i /\ latency_ok p i /\ policy_ok i })
+  (i:tm_intent{ common_core_valid i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i /\ latency_ok p i /\ policy_ok i })
   : policy_checked_intent p i =
   i
 
 type provider_checked_intent (p:profile) (i:tm_intent) =
-  v:tm_intent{ v == i /\ provider_valid p v }
+  v:tm_intent{ v == i /\ common_core_valid v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v /\ latency_ok p v /\ policy_ok v }
 
 let mk_provider_checked
   (p:profile)
-  (i:tm_intent{ provider_valid p i })
+  (i:tm_intent{ common_core_valid i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i /\ latency_ok p i /\ policy_ok i })
   : provider_checked_intent p i =
   i
 

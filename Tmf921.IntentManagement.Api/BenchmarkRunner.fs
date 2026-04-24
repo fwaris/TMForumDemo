@@ -64,6 +64,7 @@ module BenchmarkRunner =
           ProviderAdmissionSuccessRate: float
           FirstAttemptSuccessRate: float
           OneRetrySuccessRate: float
+          TwoRetrySuccessRate: float
           FirstFailedWitnesses: BenchmarkWitnessCount list }
 
     type BenchmarkRunArtifact =
@@ -73,10 +74,72 @@ module BenchmarkRunner =
           Results: BenchmarkPromptResult list
           Summary: BenchmarkRunSummary }
 
+    type BenchmarkRateSummary =
+        { SuccessCount: int
+          TrialCount: int
+          SuccessRate: float
+          Wilson95Lower: float
+          Wilson95Upper: float }
+
+    type BenchmarkAttemptFrequency =
+        { AttemptCount: int
+          Count: int }
+
+    type SyntheticCorrectnessManifest =
+        { ManifestVersion: string
+          SuiteId: string
+          GeneratedAt: DateTimeOffset
+          ExpressionCount: int
+          RepetitionCount: int
+          AttemptBudget: int
+          Prompts: BenchmarkPrompt list }
+
+    type SyntheticCorrectnessTrialResult =
+        { TrialId: string
+          Repetition: int
+          Result: BenchmarkPromptResult
+          SuccessWithinSecondRetry: bool
+          LlmParse: LlmParseMetadata option
+          Artifacts: SidecarArtifacts option
+          Diagnostics: ProcessingDiagnostic list
+          ProcessingRecordPath: string }
+
+    type SyntheticCorrectnessSummary =
+        { SuiteId: string
+          ManifestVersion: string
+          Model: string option
+          PromptVersion: string option
+          Date: DateTimeOffset
+          ExpressionCount: int
+          RepetitionCount: int
+          TrialCount: int
+          FirstAttempt: BenchmarkRateSummary
+          FirstRetry: BenchmarkRateSummary
+          SecondRetry: BenchmarkRateSummary
+          SuccessfulTrials: int
+          FailureTrials: int
+          SuccessAttemptDistribution: BenchmarkAttemptFrequency list
+          MaxAttemptCountObserved: int
+          MeanAttemptsOnSuccessfulTrials: float
+          MedianAttemptsOnSuccessfulTrials: float
+          FirstFailedWitnesses: BenchmarkWitnessCount list }
+
+    type SyntheticCorrectnessRunArtifact =
+        { RunId: string
+          Mode: string
+          Manifest: SyntheticCorrectnessManifest
+          Results: SyntheticCorrectnessTrialResult list
+          Summary: SyntheticCorrectnessSummary }
+
     let private manifestVersion = "2026-04-20.benchmark.v1"
+    let private syntheticCorrectnessManifestVersion = "2026-04-23.synthetic-correct.v1"
+    let private syntheticCorrectnessSuiteId = "synthetic-correct-expressions"
 
     let private benchmarkRoot () =
-        Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "DemoFixtures", "BenchmarkRuns")
+        Path.Combine(repoRoot (), "artifacts", "benchmark-runs")
+
+    let private syntheticCorrectnessRoot () =
+        Path.Combine(benchmarkRoot (), "synthetic-correctness")
 
     let private jsonOptions () =
         let options = JsonSerializerOptions(serializerOptions)
@@ -219,6 +282,7 @@ module BenchmarkRunner =
         let providerSuccessCount = results |> List.filter (fun result -> result.ProviderAdmissionSuccess) |> List.length
         let firstAttemptCount = results |> List.filter (fun result -> result.FirstAttemptSuccess) |> List.length
         let retryCount = results |> List.filter (fun result -> result.OneRetrySuccess) |> List.length
+        let twoRetryCount = results |> List.filter (fun result -> result.ExpectationMatched && result.AttemptCount <= 3) |> List.length
 
         let rate count =
             if promptCount = 0 then 0.0 else float count / float promptCount
@@ -243,6 +307,7 @@ module BenchmarkRunner =
           ProviderAdmissionSuccessRate = rate providerSuccessCount
           FirstAttemptSuccessRate = rate firstAttemptCount
           OneRetrySuccessRate = rate retryCount
+          TwoRetrySuccessRate = rate twoRetryCount
           FirstFailedWitnesses = witnessCounts }
 
     let private expectationMatched (prompt: BenchmarkPrompt) (record: IntentProcessingRecord) =
@@ -295,6 +360,165 @@ module BenchmarkRunner =
         let runId = "run-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)
         runId, Path.Combine(benchmarkRoot (), runId)
 
+    let private defaultSyntheticCorrectnessRunDirectory () =
+        let runId = "synthetic-correctness-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)
+        runId, Path.Combine(syntheticCorrectnessRoot (), runId)
+
+    let private createPrompt scenarioId promptIndex =
+        let scenario =
+            DemoScenarios.tryFindScenario scenarioId
+            |> Option.defaultWith (fun () -> failwith $"Unknown scenario '{scenarioId}'")
+
+        let variants = promptVariantsForScenario scenario
+
+        if promptIndex < 1 || promptIndex > variants.Length then
+            failwith $"Scenario '{scenarioId}' does not have prompt variant {promptIndex}."
+
+        { PromptId = sprintf "%s_p%02i" scenario.Id promptIndex
+          ScenarioId = scenario.Id
+          ScenarioFamily = IntentAdmission.familyName scenario.ScenarioFamily
+          PromptIndex = promptIndex
+          Text = variants |> List.item (promptIndex - 1)
+          ExpectedOutcome = string scenario.ExpectedOutcome
+          ExpectedFailedWitness = scenario.ExpectedFailedWitness }
+
+    let defaultSyntheticCorrectnessManifest repetitionCount expressionCount =
+        let selectedPrompts =
+            [ createPrompt "broadcast_success_01" 1
+              createPrompt "broadcast_success_01" 2
+              createPrompt "broadcast_success_01" 3
+              createPrompt "broadcast_success_01" 4
+              createPrompt "broadcast_success_01" 5
+              createPrompt "critical_success_01" 1
+              createPrompt "critical_success_01" 2
+              createPrompt "critical_success_01" 3
+              createPrompt "critical_success_01" 4
+              createPrompt "critical_success_01" 5 ]
+            |> List.truncate (max 1 expressionCount)
+
+        { ManifestVersion = syntheticCorrectnessManifestVersion
+          SuiteId = syntheticCorrectnessSuiteId
+          GeneratedAt = DateTimeOffset.UtcNow
+          ExpressionCount = selectedPrompts.Length
+          RepetitionCount = max 1 repetitionCount
+          AttemptBudget = 3
+          Prompts = selectedPrompts }
+
+    let private wilson95 successes trials =
+        if trials <= 0 then
+            0.0, 0.0
+        else
+            let z = 1.959963984540054
+            let n = float trials
+            let p = float successes / n
+            let z2 = z * z
+            let denominator = 1.0 + z2 / n
+            let center = (p + z2 / (2.0 * n)) / denominator
+            let margin =
+                z
+                * sqrt ((p * (1.0 - p) + z2 / (4.0 * n)) / n)
+                / denominator
+
+            max 0.0 (center - margin), min 1.0 (center + margin)
+
+    let private rateSummary successes trials =
+        let lower, upper = wilson95 successes trials
+
+        { SuccessCount = successes
+          TrialCount = trials
+          SuccessRate =
+            if trials = 0 then
+                0.0
+            else
+                float successes / float trials
+          Wilson95Lower = lower
+          Wilson95Upper = upper }
+
+    let private median (values: int list) =
+        match values |> List.sort with
+        | [] -> 0.0
+        | xs ->
+            let length = xs.Length
+            let middle = length / 2
+
+            if length % 2 = 1 then
+                float xs[middle]
+            else
+                float (xs[middle - 1] + xs[middle]) / 2.0
+
+    let private syntheticTrialResult prompt repetition (record: IntentProcessingRecord) =
+        let result = resultFromProcessingRecord prompt record
+
+        { TrialId = sprintf "r%02i_%s" repetition prompt.PromptId
+          Repetition = repetition
+          Result = result
+          SuccessWithinSecondRetry = result.ExpectationMatched && result.AttemptCount <= 3
+          LlmParse = record.LlmParse
+          Artifacts = record.Artifacts
+          Diagnostics = record.Diagnostics
+          ProcessingRecordPath = "" }
+
+    let summarizeSyntheticCorrectnessResults
+        date
+        (manifest: SyntheticCorrectnessManifest)
+        (results: SyntheticCorrectnessTrialResult list) =
+        let trialCount = results.Length
+        let firstAttemptCount = results |> List.filter (fun result -> result.Result.FirstAttemptSuccess) |> List.length
+        let firstRetryCount = results |> List.filter (fun result -> result.Result.OneRetrySuccess) |> List.length
+        let secondRetryCount = results |> List.filter (fun result -> result.SuccessWithinSecondRetry) |> List.length
+        let successfulAttempts =
+            results
+            |> List.choose (fun result ->
+                if result.Result.ExpectationMatched then
+                    Some result.Result.AttemptCount
+                else
+                    None)
+
+        let attemptDistribution =
+            successfulAttempts
+            |> List.countBy id
+            |> List.sortBy fst
+            |> List.map (fun (attemptCount, count) ->
+                { AttemptCount = attemptCount
+                  Count = count })
+
+        let witnessCounts =
+            results
+            |> List.choose (fun result -> result.Result.FirstFailedWitness)
+            |> List.countBy id
+            |> List.sortBy fst
+            |> List.map (fun (witness, count) -> { Witness = witness; Count = count })
+
+        let maxAttemptCountObserved =
+            results
+            |> List.map (fun result -> result.Result.AttemptCount)
+            |> List.fold (fun current value -> max current value) 0
+
+        let successfulTrialCount = successfulAttempts.Length
+
+        { SuiteId = manifest.SuiteId
+          ManifestVersion = manifest.ManifestVersion
+          Model = results |> List.tryPick (fun result -> result.Result.Model)
+          PromptVersion = results |> List.tryPick (fun result -> result.Result.PromptVersion)
+          Date = date
+          ExpressionCount = manifest.ExpressionCount
+          RepetitionCount = manifest.RepetitionCount
+          TrialCount = trialCount
+          FirstAttempt = rateSummary firstAttemptCount trialCount
+          FirstRetry = rateSummary firstRetryCount trialCount
+          SecondRetry = rateSummary secondRetryCount trialCount
+          SuccessfulTrials = successfulTrialCount
+          FailureTrials = trialCount - successfulTrialCount
+          SuccessAttemptDistribution = attemptDistribution
+          MaxAttemptCountObserved = maxAttemptCountObserved
+          MeanAttemptsOnSuccessfulTrials =
+            if List.isEmpty successfulAttempts then
+                0.0
+            else
+                successfulAttempts |> List.averageBy float
+          MedianAttemptsOnSuccessfulTrials = median successfulAttempts
+          FirstFailedWitnesses = witnessCounts }
+
     let runLiveAsync (rawIntentGenerator: IRawIntentGenerator) (outputDirectory: string option) =
         task {
             let manifest = defaultManifest ()
@@ -327,7 +551,7 @@ module BenchmarkRunner =
 
             let finalizedResults = results |> Seq.toList
             let summary = summarizeResults DateTimeOffset.UtcNow finalizedResults
-            let artifact =
+            let artifact : BenchmarkRunArtifact =
                 { RunId = runId
                   Mode = "live"
                   Manifest = manifest
@@ -349,7 +573,7 @@ module BenchmarkRunner =
         let results = readJson<BenchmarkPromptResult list> resultsPath
         let summary = summarizeResults DateTimeOffset.UtcNow results
 
-        let artifact =
+        let artifact : BenchmarkRunArtifact =
             { RunId = Path.GetFileName normalized
               Mode = "replay"
               Manifest = manifest
@@ -359,3 +583,57 @@ module BenchmarkRunner =
         writeJson (Path.Combine(normalized, "summary.replay.json")) summary
         writeJson (Path.Combine(normalized, "run.replay.json")) artifact
         artifact
+
+    let runSyntheticCorrectnessAsync
+        (rawIntentGenerator: IRawIntentGenerator)
+        (outputDirectory: string option)
+        repetitionCount
+        expressionCount =
+        task {
+            let manifest = defaultSyntheticCorrectnessManifest repetitionCount expressionCount
+
+            let runId, runDirectory =
+                match outputDirectory with
+                | Some path when not (String.IsNullOrWhiteSpace path) ->
+                    let normalized = Path.GetFullPath path
+                    Path.GetFileName normalized, normalized
+                | _ -> defaultSyntheticCorrectnessRunDirectory ()
+
+            Directory.CreateDirectory(runDirectory) |> ignore
+            writeJson (Path.Combine(runDirectory, "manifest.json")) manifest
+
+            let results = ResizeArray<SyntheticCorrectnessTrialResult>()
+
+            for repetition in 1 .. manifest.RepetitionCount do
+                for prompt in manifest.Prompts do
+                    let request = DemoScenarios.buildNaturalLanguageRequest prompt.Text
+                    let intentId = sprintf "synthetic-%s-r%02i" prompt.PromptId repetition
+                    let! outcome =
+                        IntentPipeline.processIntentWithContextAsync
+                            rawIntentGenerator
+                            RawIntentGenerationContext.Live
+                            intentId
+                            request
+
+                    let result = syntheticTrialResult prompt repetition outcome.ProcessingRecord
+                    let processingRecordPath = Path.Combine(runDirectory, "processing-records", $"{result.TrialId}.json")
+                    let finalizedResult = { result with ProcessingRecordPath = processingRecordPath }
+                    results.Add finalizedResult
+                    writeJson (Path.Combine(runDirectory, "results", $"{finalizedResult.TrialId}.json")) finalizedResult
+                    writeJson processingRecordPath outcome.ProcessingRecord
+
+            let finalizedResults = results |> Seq.toList
+            let summary = summarizeSyntheticCorrectnessResults DateTimeOffset.UtcNow manifest finalizedResults
+            let artifact : SyntheticCorrectnessRunArtifact =
+                { RunId = runId
+                  Mode = "live_synthetic_correctness"
+                  Manifest = manifest
+                  Results = finalizedResults
+                  Summary = summary }
+
+            writeJson (Path.Combine(runDirectory, "results.json")) finalizedResults
+            writeJson (Path.Combine(runDirectory, "summary.json")) summary
+            writeJson (Path.Combine(runDirectory, "run.json")) artifact
+
+            return artifact
+        }

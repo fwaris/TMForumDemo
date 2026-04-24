@@ -121,14 +121,6 @@ let policy_ok (i:raw_tm_intent) : bool =
   protected_traffic_preserved security &&
   not (requests_preemption security)
 
-let provider_valid (p:profile) (i:raw_tm_intent) : bool =
-  common_core_valid i &&
-  window_ok i &&
-  profile_matches p i &&
-  capacity_ok p i &&
-  latency_ok p i &&
-  policy_ok i
-
 type window_checked_intent (i:raw_tm_intent) =
   v:raw_tm_intent{ v == i /\ common_core_valid v /\ window_ok v }
 
@@ -174,11 +166,11 @@ let mk_policy_checked
   i
 
 type provider_checked_intent (p:profile) (i:raw_tm_intent) =
-  v:raw_tm_intent{ v == i /\ provider_valid p v }
+  v:raw_tm_intent{ v == i /\ common_core_valid v /\ window_ok v /\ profile_matches p v /\ capacity_ok p v /\ latency_ok p v /\ policy_ok v }
 
 let mk_provider_checked
   (p:profile)
-  (i:raw_tm_intent{ provider_valid p i })
+  (i:raw_tm_intent{ common_core_valid i /\ window_ok i /\ profile_matches p i /\ capacity_ok p i /\ latency_ok p i /\ policy_ok i })
   : provider_checked_intent p i =
   i
 

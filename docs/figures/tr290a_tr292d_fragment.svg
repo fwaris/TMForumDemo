@@ -66,10 +66,10 @@
   <text class="edge-label" x="356" y="96">contains</text>
 
   <path class="edge edge-dashed" marker-end="url(#arrow)" d="M200 139 L235 139" />
-  <text class="edge-label" x="217" y="130">subClassOf</text>
+  <text class="edge-label-small" x="190" y="98">subClassOf</text>
 
   <path class="edge edge-dashed" marker-end="url(#arrow)" d="M405 139 L385 139" />
-  <text class="edge-label" x="395" y="130">subClassOf</text>
+  <text class="edge-label-small" x="430" y="98">subClassOf</text>
 
   <path class="edge" marker-end="url(#arrow)" d="M117.5 170 L117.5 236" />
   <text class="edge-label" x="157" y="206">icm:target</text>

@@ -15,37 +15,37 @@ Database file #1: icnp2026_submission.bib
 Done.
 You've used 28 entries,
             4024 wiz_defined-function locations,
-            936 strings with 11779 characters,
-and the built_in function-call counts, 14713 in all, are:
-= -- 1141
-> -- 412
+            941 strings with 11943 characters,
+and the built_in function-call counts, 14817 in all, are:
+= -- 1150
+> -- 421
 < -- 18
-+ -- 204
-- -- 97
-* -- 664
-:= -- 2525
++ -- 208
+- -- 99
+* -- 676
+:= -- 2545
 add.period$ -- 56
 call.type$ -- 28
-change.case$ -- 46
+change.case$ -- 45
 chr.to.int$ -- 42
 cite$ -- 28
-duplicate$ -- 1121
-empty$ -- 1285
-format.name$ -- 107
-if$ -- 3218
+duplicate$ -- 1124
+empty$ -- 1289
+format.name$ -- 110
+if$ -- 3239
 int.to.chr$ -- 0
 int.to.str$ -- 28
-missing$ -- 285
-newline$ -- 153
+missing$ -- 286
+newline$ -- 155
 num.names$ -- 28
-pop$ -- 793
+pop$ -- 798
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 2
-skip$ -- 1118
+skip$ -- 1122
 stack$ -- 0
-substring$ -- 162
-swap$ -- 728
+substring$ -- 160
+swap$ -- 733
 text.length$ -- 4
 text.prefix$ -- 0
 top$ -- 5
@@ -53,4 +53,4 @@ type$ -- 28
 warning$ -- 0
 while$ -- 36
 width$ -- 30
-write$ -- 320
+write$ -- 323

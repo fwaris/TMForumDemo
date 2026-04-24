@@ -27,6 +27,19 @@ type BenchmarkRunnerTests() =
         )
 
     [<Fact>]
+    member _.``Synthetic correctness manifest contains 10 accepted prompts``() =
+        let manifest = BenchmarkRunner.defaultSyntheticCorrectnessManifest 30 10
+
+        Assert.Equal(10, manifest.ExpressionCount)
+        Assert.Equal(30, manifest.RepetitionCount)
+        Assert.Equal(10, manifest.Prompts.Length)
+        Assert.All(
+            manifest.Prompts,
+            fun prompt ->
+                Assert.Equal("DemoAccept", prompt.ExpectedOutcome)
+        )
+
+    [<Fact>]
     member _.``Benchmark summary computes first-attempt and retry success rates``() =
         let results : BenchmarkRunner.BenchmarkPromptResult list =
             [ { PromptId = "a"
@@ -78,4 +91,5 @@ type BenchmarkRunnerTests() =
         Assert.Equal(3, summary.AttemptCount)
         Assert.Equal(0.5, summary.FirstAttemptSuccessRate, 5)
         Assert.Equal(1.0, summary.OneRetrySuccessRate, 5)
+        Assert.Equal(1.0, summary.TwoRetrySuccessRate, 5)
         Assert.Contains(summary.FirstFailedWitnesses, fun item -> item.Witness = "capacity_checked_intent" && item.Count = 1)

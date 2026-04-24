@@ -279,7 +279,7 @@ module RawIntentGenerationValidation =
           Diagnostics = finalDiagnostics }
 
 type RawIntentGenerator(chatClient: IChatClient, options: IntentLlmOptions) =
-    let promptVersion = "2026-04-20.fstar-intent.v1"
+    let promptVersion = "2026-04-23.fstar-intent.v2"
 
     let diagnostic code message details =
         { Code = code
@@ -311,6 +311,7 @@ Output contract:
 Allowed F* shape:
 - The module must open `TmForumTr292CommonCore`.
 - It must declare exactly one `let candidate_intent : raw_tm_intent = {{ ... }}` record.
+- Prefer the module name `GeneratedIntent`.
 - Use only these record fields:
   intent_name
   scenario_family
@@ -336,10 +337,54 @@ Allowed enum values:
 - scenario_family: BroadcastFamily | CriticalServiceFamily
 - target_kind: Some VenueTarget | Some FacilityTarget | None
 
+Exact field formatting rules:
+- `intent_name` is a required string, so write `"..."`, never `Some "..."`.
+- `target_name`, `service_class`, `timezone`, and `event_month` are optional strings, so write either `None` or `Some "..."`.
+- `event_month` must be a month name string such as `Some "April"`, never `Some 4`.
+- `event_day`, `event_year`, `start_hour`, `end_hour`, `primary_device_count`, `auxiliary_endpoint_count`, `max_latency_ms`, and `reporting_interval_minutes` are optional naturals, so write either `None` or `Some 25`.
+- `target_kind` is an optional enum, so write `Some VenueTarget`, `Some FacilityTarget`, or `None`.
+- Boolean fields must be bare `true` or `false`.
+
+Canonical module template:
+```fstar
+module GeneratedIntent
+
+open TmForumTr292CommonCore
+
+let candidate_intent : raw_tm_intent =
+  {{ intent_name = "LiveBroadcastIntent";
+    scenario_family = BroadcastFamily;
+    target_name = Some "Detroit Stadium";
+    target_kind = Some VenueTarget;
+    service_class = Some "premium-5g-broadcast";
+    event_month = Some "April";
+    event_day = Some 25;
+    event_year = Some 2026;
+    start_hour = Some 18;
+    end_hour = Some 22;
+    timezone = Some "America/Detroit";
+    primary_device_count = Some 200;
+    auxiliary_endpoint_count = None;
+    max_latency_ms = Some 20;
+    reporting_interval_minutes = Some 60;
+    immediate_degradation_alerts = true;
+    safety_policy_declared = true;
+    preserve_emergency_traffic = true;
+    request_public_safety_preemption = false }}
+```
+
+Common syntax mistakes to avoid:
+- Wrong: `intent_name = Some "LiveBroadcastIntent"`
+- Right: `intent_name = "LiveBroadcastIntent"`
+- Wrong: `event_month = Some 4`
+- Right: `event_month = Some "April"`
+
 Rules:
 - Extract semantics from the user's text without inventing targets, dates, times, quantities, or policy facts.
 - Preserve explicit bad-but-stated semantics, such as reversed time windows.
 - Do not perform provider-admission reasoning.
+- For broadcast requests, set `intent_name = "LiveBroadcastIntent"`.
+- For critical-service requests, set `intent_name = "CriticalServiceIntent"`.
 - For broadcast requests, use service_class = Some "premium-5g-broadcast" when the text clearly indicates premium 5G broadcast service.
 - For critical-service requests, use service_class = Some "ultra-reliable-5g-clinical" when the text clearly indicates telemedicine, clinical, or critical-care service.
 - Set safety_policy_declared = true only if the text explicitly states either protected-traffic preservation or public-safety preemption.
@@ -396,6 +441,7 @@ Natural-language intent:
 Reminder:
 - Return only the structured response.
 - When parsed, moduleText must contain exactly one F* module using the allowed record shape.
+- Follow the canonical field formatting exactly, especially for `intent_name` and `event_month`.
 - Do not emit provider witness code or additional helper functions.
 - Do not invent unstated facts."""
 
