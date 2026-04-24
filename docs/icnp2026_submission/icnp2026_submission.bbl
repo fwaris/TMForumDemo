@@ -196,13 +196,6 @@ M.~Kim and S.-Y. Yun, ``{Process-Verified Reinforcement Learning for Theorem
   \url{https://openai.com/index/browsecomp/}
 \BIBentrySTDinterwordspacing
 
-\bibitem{tmforumdemo_repo}
-\BIBentryALTinterwordspacing
-{TMForumDemo Contributors}, ``{TMForumDemo Project Repository},'' 2026,
-  accessed April 24, 2026. [Online]. Available:
-  \url{https://github.com/fwaris/TMForumDemo}
-\BIBentrySTDinterwordspacing
-
 \bibitem{mtp}
 \BIBentryALTinterwordspacing
 J.~Mars, Y.~Kang, J.~L. Dantanarayana, K.~Sivasothynathan, C.~Clarke, B.~Li,

@@ -37,26 +37,7 @@
 
 \title{Proof-Oriented Validation of LLM-Generated Intents for Autonomous Networks}
 
-\author{
-\IEEEauthorblockN{Faisal Waris, Member, IEEE}
-\IEEEauthorblockA{\textit{Dept. of Computer Science}\\
-\textit{Wayne State University}\\
-Detroit, MI 48201, USA\\
-faisalwaris@live.com}
-\and
-\IEEEauthorblockN{Robert G. Reynolds, Senior Member, IEEE}
-\IEEEauthorblockA{\textit{Dept. of Computer Science}\\
-\textit{Wayne State University}\\
-Detroit, MI 48201, USA\\
-\textit{Museum of Anthropological Archaeology}\\
-\textit{University of Michigan--Ann Arbor}\\
-Ann Arbor, MI 48104, USA\\
-reynolds@cs.wayen.edu}
-\and
-\IEEEauthorblockN{Srinivasan Srikrishna}
-\IEEEauthorblockA{\textit{T-Mobile}\\
-srikrishna.srinivasan19@t-mobile.com}
-}
+\author{\IEEEauthorblockN{Anonymous Authors}}
 
 \maketitle
 
@@ -170,7 +151,7 @@ BrowseComp & 1.9\% & 82.7\% \\
 
 \section{Processing Overview}
 
-The prototype shell implementation, source code, and accompanying artifacts are available in the project repository \cite{tmforumdemo_repo}. The implementation has two distinct stages: offline and online. Offline, a selected subset of the TM Forum intent ontology is projected into F* modules that define the standards-aligned baseline used by the checker \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}. Online, the TMF921 \textit{expression} field is extracted, translated into F* artifacts when needed, and admitted only if both standards-aligned and provider-specific predicates hold. Additional artifacts are also emitted for traceability and diagnostics.
+The prototype shell implementation has two distinct stages: offline and online. Offline, a selected subset of the TM Forum intent ontology is projected into F* modules that define the standards-aligned baseline used by the checker \cite{tr292_tio,tr290a,tr292d,fstar_site,fstar_popl}. Online, the TMF921 \textit{expression} field is extracted, translated into F* artifacts when needed, and admitted only if both standards-aligned and provider-specific predicates hold. Additional artifacts are also emitted for traceability and diagnostics.
 
 Figure~\ref{fig:processing-pipeline} summarizes this online path and shows where rejection diagnostics are produced.
 
