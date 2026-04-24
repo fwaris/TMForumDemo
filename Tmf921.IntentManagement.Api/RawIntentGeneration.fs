@@ -6,6 +6,7 @@ open System.Text
 open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
+open System.ClientModel
 open Microsoft.Extensions.AI
 
 [<CLIMutable>]
@@ -65,6 +66,91 @@ module IntentLlmDefaults =
           Temperature = 0.0f
           TimeoutSeconds = 30
           UseScenarioFixtures = false }
+
+type OpenAiFailureClassification =
+    { Code: string
+      Message: string
+      Details: string option
+      Outcome: string
+      Terminal: bool }
+
+module RawIntentOpenAiErrors =
+    let private contains (needle: string) (haystack: string) =
+        haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0
+
+    let private reasonFrom (text: string) =
+        [ "insufficient_quota"
+          "rate_limit_exceeded"
+          "invalid_api_key"
+          "invalid_request_error"
+          "server_error"
+          "model_not_found" ]
+        |> List.tryFind (fun reason -> contains reason text)
+
+    let private details status reason =
+        match status, reason with
+        | Some status, Some reason -> Some $"HTTP {status} {reason}"
+        | Some status, None -> Some $"HTTP {status}"
+        | None, Some reason -> Some reason
+        | None, None -> None
+
+    let classify status (errorText: string) =
+        let text = errorText |> Option.ofObj |> Option.defaultValue ""
+        let reason = reasonFrom text
+        let hasQuotaSignal =
+            contains "insufficient_quota" text
+            || contains "exceeded your current quota" text
+            || contains "run out of credits" text
+            || contains "monthly spend" text
+
+        match status with
+        | Some 429 when hasQuotaSignal ->
+            { Code = "OPENAI_QUOTA_EXHAUSTED"
+              Message = "The public demo's monthly AI budget has been used up. Live ad-hoc normalization will resume when the quota resets."
+              Details = details status (Some "insufficient_quota")
+              Outcome = "quota_exhausted"
+              Terminal = true }
+        | _ when hasQuotaSignal ->
+            { Code = "OPENAI_QUOTA_EXHAUSTED"
+              Message = "The public demo's monthly AI budget has been used up. Live ad-hoc normalization will resume when the quota resets."
+              Details = details status (Some "insufficient_quota")
+              Outcome = "quota_exhausted"
+              Terminal = true }
+        | Some 429 ->
+            { Code = "OPENAI_RATE_LIMITED"
+              Message = "The AI service is busy. Please wait a moment and try again."
+              Details = details status (reason |> Option.orElse (Some "rate_limit"))
+              Outcome = "rate_limited"
+              Terminal = false }
+        | Some status when status = 401 || status = 403 ->
+            { Code = "OPENAI_AUTH_ERROR"
+              Message = "The demo's AI key is not currently configured correctly."
+              Details = details (Some status) reason
+              Outcome = "auth_error"
+              Terminal = true }
+        | Some 400 ->
+            { Code = "OPENAI_BAD_REQUEST"
+              Message = "The AI request is not compatible with the configured model."
+              Details = details status reason
+              Outcome = "bad_request"
+              Terminal = true }
+        | Some status when status = 500 || status = 502 || status = 503 || status = 504 ->
+            { Code = "OPENAI_UNAVAILABLE"
+              Message = "The AI service did not respond in time. Please try again shortly."
+              Details = details (Some status) reason
+              Outcome = "unavailable"
+              Terminal = false }
+        | _ ->
+            { Code = "LLM_TRANSPORT_ERROR"
+              Message = "The LLM request failed before a structured result was returned."
+              Details = details status reason
+              Outcome = "transport_error"
+              Terminal = false }
+
+    let statusFromException (ex: exn) =
+        match ex with
+        | :? ClientResultException as clientEx when clientEx.Status > 0 -> Some clientEx.Status
+        | _ -> None
 
 module RawIntentContracts =
     let private schemasDir () =
@@ -467,7 +553,8 @@ Reminder:
     let buildChatOptions () =
         let options = ChatOptions()
         options.ModelId <- effectiveOptions.Model
-        options.Temperature <- Nullable effectiveOptions.Temperature
+        if not (effectiveOptions.Model.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase)) then
+            options.Temperature <- Nullable effectiveOptions.Temperature
         options.MaxOutputTokens <- Nullable 3500
         options
 
@@ -665,24 +752,29 @@ Reminder:
                                         selectedOutcome <- "timeout"
                                         finalDiagnostics <- issues
                                 | ex ->
+                                    let classification =
+                                        RawIntentOpenAiErrors.classify
+                                            (RawIntentOpenAiErrors.statusFromException ex)
+                                            (ex.ToString())
+
                                     let issues =
                                         [ diagnostic
-                                            "LLM_TRANSPORT_ERROR"
-                                            "The LLM request failed before a structured result was returned."
-                                            (Some(ex.ToString())) ]
+                                            classification.Code
+                                            classification.Message
+                                            classification.Details ]
 
                                     attempts.Add
                                         { Attempt = attemptNumber
                                           Source = "live_model"
-                                          Outcome = "transport_error"
+                                          Outcome = classification.Outcome
                                           ResponseId = None
                                           FinishReason = None
                                           Issues = issues }
 
                                     priorIssues <- issues
 
-                                    if attemptNumber = effectiveOptions.MaxAttempts then
-                                        selectedOutcome <- "transport_error"
+                                    if classification.Terminal || attemptNumber = effectiveOptions.MaxAttempts then
+                                        selectedOutcome <- classification.Outcome
                                         finalDiagnostics <- issues
 
                         return

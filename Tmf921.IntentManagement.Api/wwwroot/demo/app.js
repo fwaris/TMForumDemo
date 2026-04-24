@@ -93,6 +93,29 @@ function renderIssues(listElement, issues, emptyText) {
   });
 }
 
+const aiFailureMessages = {
+  OPENAI_QUOTA_EXHAUSTED: "The public demo's monthly AI budget has been used up. Checked-in scenarios still work; live ad-hoc normalization will resume when the quota resets.",
+  OPENAI_RATE_LIMITED: "The AI service is busy. Please wait a moment and try again.",
+  OPENAI_AUTH_ERROR: "The demo's AI key is not currently configured correctly.",
+  OPENAI_BAD_REQUEST: "The AI request is not compatible with the configured model.",
+  OPENAI_UNAVAILABLE: "The AI service did not respond in time. Please try again shortly.",
+  LLM_TIMEOUT: "The AI service did not respond in time. Please try again shortly."
+};
+
+function aiFailureDiagnostic(result) {
+  const diagnostics = result?.pipeline?.diagnostics || [];
+  return diagnostics.find((diag) => Object.hasOwn(aiFailureMessages, diag.code)) || null;
+}
+
+function aiFailureSummary(result) {
+  const diagnostic = aiFailureDiagnostic(result);
+  if (!diagnostic) {
+    return null;
+  }
+
+  return aiFailureMessages[diagnostic.code] || diagnostic.message;
+}
+
 function laneClass(card, state) {
   if (!card) {
     return;
@@ -136,11 +159,15 @@ function pipelineAuditText(result) {
     return "No shell-processing audit record is available.";
   }
 
+  const llmParse = result.pipeline.llmParse || null;
+
   return JSON.stringify(
     {
       classification: result.pipeline.classification,
       status: result.pipeline.status,
       checkerVersion: result.pipeline.checkerVersion,
+      model: llmParse?.model || null,
+      llmOutcome: llmParse?.selectedOutcome || null,
       diagnostics: result.pipeline.diagnostics || [],
       artifacts: result.pipeline.artifacts || null
     },
@@ -305,13 +332,14 @@ function updateScenarioDetails() {
 function applyResult(result) {
   const validation = result.validation;
   const scenario = result.scenario;
+  const aiSummary = aiFailureSummary(result);
 
   if (summaryStrip) {
     summaryStrip.className = "summary-strip";
-    summaryStrip.classList.add(validation.finalOutcome === "accepted" ? "success" : "failure");
+    summaryStrip.classList.add(aiSummary ? "ai-service" : validation.finalOutcome === "accepted" ? "success" : "failure");
   }
 
-  setText(summaryStrip, `${outcomeLabel(validation.finalOutcome)}. ${scenario.expectedMessage}`);
+  setText(summaryStrip, aiSummary || `${outcomeLabel(validation.finalOutcome)}. ${scenario.expectedMessage}`);
   setText(storyStrip, validation.story || scenario.story || "");
 
   setText(jsonSummary, jsonSummaryText(validation));

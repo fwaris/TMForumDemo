@@ -7,6 +7,23 @@ open Tmf921.IntentManagement.Api
 open Tmf921.IntentManagement.Api.Tests.TestHelpers
 
 type RawIntentGenerationTests() =
+    [<Theory>]
+    [<InlineData(429, "HTTP 429 (insufficient_quota: insufficient_quota)", "OPENAI_QUOTA_EXHAUSTED", "quota_exhausted", true)>]
+    [<InlineData(429, "HTTP 429 (rate_limit_exceeded: rate_limit_exceeded)", "OPENAI_RATE_LIMITED", "rate_limited", false)>]
+    [<InlineData(401, "HTTP 401 invalid_api_key", "OPENAI_AUTH_ERROR", "auth_error", true)>]
+    [<InlineData(400, "HTTP 400 unsupported parameter", "OPENAI_BAD_REQUEST", "bad_request", true)>]
+    [<InlineData(503, "HTTP 503 server_error", "OPENAI_UNAVAILABLE", "unavailable", false)>]
+    member _.``OpenAI transport failures map to safe diagnostics``
+        (status: int, text: string, expectedCode: string, expectedOutcome: string, expectedTerminal: bool)
+        =
+        let actual = RawIntentOpenAiErrors.classify (Some status) text
+
+        Assert.Equal(expectedCode, actual.Code)
+        Assert.Equal(expectedOutcome, actual.Outcome)
+        Assert.Equal(expectedTerminal, actual.Terminal)
+        Assert.DoesNotContain(" at ", actual.Details |> Option.defaultValue "")
+        Assert.DoesNotContain("Exception", actual.Message)
+
     [<Fact>]
     member _.``Malformed F* output fails validation``() =
         let envelope =
