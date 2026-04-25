@@ -35,7 +35,7 @@
 
 \begin{document}
 
-\title{Proof-Oriented Validation of LLM-Generated Intents for Autonomous Networks}
+\title{Proof-Oriented Validation of Natural-Language Intents for Autonomous Networks}
 
 \author{\IEEEauthorblockN{Anonymous Authors}}
 
@@ -118,7 +118,7 @@ let addOneError: T2 = fun x -> x + 1
 \end{lstlisting}
 
 The type \texttt{Even n} is a dependent type because it \textit{depends} on the \textit{value} \texttt{n} which is supplied from where the type is used. Here \texttt{n} in \texttt{Even n} is used in the constraint \texttt{n \% 2 = 0} that is part of the type declaration. In fact any arbitrary constraint can be used as part of a type declaration.
-\textit{In summary, in a dependent type system, types can depend on values and other functions}. However, this simple explanation does not do justice to the full expressiveness of dependent types, but it gives a flavor of how they can encode constraints. 
+\textit{In summary, in a dependent type system, types can depend on values and other functions}. However, this simple explanation does not do justice to the full expressiveness of dependent types, but it gives a flavor of how they can encode constraints. In principle, dependently typed programming languages can encode any mathematical theorem expressible in the underlying formal language \cite{mathematics_in_lean}.
 
 It suffices to understand that a complex set of constraints can be encoded as dependent types. Even state machines can be encoded as types. The key point is that system (or business) constraints/rules can be \textit{modelled} as types. Then, the validation (of code that uses these types) is automatic via the proof-oriented type checkers. Non-dependently typed languages -- with simpler type checkers -- cannot express such constraints as types.
 
@@ -132,6 +132,8 @@ Experiments in this prototype show that current \textit{frontier} models can gen
 A plausible contributor to this improvement is the broader shift toward reinforcement learning with verifiable rewards (RLVR) \cite{rlvr_grpo} on tasks with objective checkers, including mathematics, code, and formal reasoning. Public evidence for proprietary \textit{frontier} models remains limited. However, Google DeepMind states that the advanced Gemini Deep Think model used for International Mathematical Olympiad (IMO)-level reasoning \cite{imo_official} was additionally trained with novel reinforcement learning techniques that leverage multi-step reasoning, problem-solving, and theorem-proving data \cite{gemini_deep_think_imo}. In the open literature, Tulu 3 explicitly identifies RLVR as a post-training method \cite{tulu3_rlvr}, and recent Lean-based work shows how proof assistants can serve as verifier-grounded reward oracles during theorem-proving training \cite{process_verified_rl_lean}. While these sources do not establish that GPT-5.4 itself was post-trained on Lean traces, they do show that verifiable-reward training over formal reasoning tasks is now a credible part of the broader frontier-model toolkit.
 
 The likely involvement of dependently-typed languages in post-training of frontier LLMs (either directly or indirectly) is an indication towards their satisfactory performance on dependent-type code generation.
+
+While the dependently typed Lean language \cite{mathematics_in_lean,lean4_theorem_prover} is favored for LLM training, F* is more suited for automatic validation of LLM-generated artifacts because it supports a higher degree of proof automation. F* relies heavily on the Z3 satisfiability modulo theories (SMT) solver to automate proofs \cite{fstar_popl,z3_smt_solver,smt_barrett_tinelli}. Lean, on the other hand, was built as an interactive proof assistant and is oriented toward human-assisted proof construction using \textit{tactics} \cite{lean4_theorem_prover,lean_tactic_reference}.
 
 \begin{table}[t]
 \centering

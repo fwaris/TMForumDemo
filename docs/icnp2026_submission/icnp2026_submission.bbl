@@ -116,6 +116,13 @@ L.~de~Moura, S.~Kong, J.~Avigad, F.~van Doorn, and J.~von Raumer, ``The lean
   \url{https://doi.org/10.1007/978-3-319-21401-6_26}
 \BIBentrySTDinterwordspacing
 
+\bibitem{mathematics_in_lean}
+\BIBentryALTinterwordspacing
+J.~Avigad and P.~Massot, ``{Mathematics in Lean},'' 2025, version 4.19.0;
+  accessed April 25, 2026. [Online]. Available:
+  \url{https://leanprover-community.github.io/mathematics_in_lean/}
+\BIBentrySTDinterwordspacing
+
 \bibitem{claude_code_overview}
 \BIBentryALTinterwordspacing
 {Anthropic}, ``{Claude Code Overview},'' 2026, accessed April 23, 2026.
@@ -173,6 +180,36 @@ N.~Lambert, J.~Morrison, V.~Pyatkin, S.~Huang, H.~Ivison, F.~Brahman, L.~J.~V.
 M.~Kim and S.-Y. Yun, ``{Process-Verified Reinforcement Learning for Theorem
   Proving via Lean},'' in \emph{NeurIPS 2025 Workshop MATH-AI}, 2025, poster
   paper. [Online]. Available: \url{https://openreview.net/forum?id=sKvVHgmRP2}
+\BIBentrySTDinterwordspacing
+
+\bibitem{lean4_theorem_prover}
+\BIBentryALTinterwordspacing
+L.~de~Moura and S.~Ullrich, ``{The Lean 4 Theorem Prover and Programming
+  Language},'' in \emph{Automated Deduction -- CADE 28}, 2021, pp. 625--635.
+  [Online]. Available: \url{https://doi.org/10.1007/978-3-030-79876-5_37}
+\BIBentrySTDinterwordspacing
+
+\bibitem{z3_smt_solver}
+\BIBentryALTinterwordspacing
+L.~de~Moura and N.~Bj{\o}rner, ``{Z3: An Efficient SMT Solver},'' in
+  \emph{Tools and Algorithms for the Construction and Analysis of Systems},
+  2008, pp. 337--340. [Online]. Available:
+  \url{https://doi.org/10.1007/978-3-540-78800-3_24}
+\BIBentrySTDinterwordspacing
+
+\bibitem{smt_barrett_tinelli}
+\BIBentryALTinterwordspacing
+C.~Barrett and C.~Tinelli, ``{Satisfiability Modulo Theories},'' in
+  \emph{Handbook of Satisfiability}, 2nd~ed.\hskip 1em plus 0.5em minus
+  0.4em\relax IOS Press, 2021. [Online]. Available:
+  \url{https://theory.stanford.edu/~barrett/pubs/BT18.pdf}
+\BIBentrySTDinterwordspacing
+
+\bibitem{lean_tactic_reference}
+\BIBentryALTinterwordspacing
+{Lean FRO}, ``{The Lean Language Reference: Tactic Proofs},'' 2026, accessed
+  April 25, 2026. [Online]. Available:
+  \url{https://lean-lang.org/doc/reference/latest/Tactic-Proofs/}
 \BIBentrySTDinterwordspacing
 
 \bibitem{gpt54_openai}
