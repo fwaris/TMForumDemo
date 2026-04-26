@@ -135,6 +135,10 @@ The likely involvement of dependently-typed languages in post-training of fronti
 
 While the dependently typed Lean language \cite{mathematics_in_lean,lean4_theorem_prover} is favored for LLM training, F* is more suited for automatic validation of LLM-generated artifacts because it supports a higher degree of proof automation. F* relies heavily on the Z3 satisfiability modulo theories (SMT) solver to automate proofs \cite{fstar_popl,z3_smt_solver,smt_barrett_tinelli}. Lean, on the other hand, was built as an interactive proof assistant and is oriented toward human-assisted proof construction using \textit{tactics} \cite{lean4_theorem_prover,lean_tactic_reference}.
 
+The F* type checker statically analyzes source code to prove correctness. As such it can handle much more complexity than what its taxed with when validating TMF921 intents. However these simple, declarative intents actually drive complex \textit{control code} to manage dynamic networks. There is no reason why LLM code generation cannot be taken further to generate the actual \textit{control code} from the parsed intents. Type-based checks and balances can still apply but at a more granular level allowing for  composable constraints enabling flexible intent expressions to possibly handle previously unanticipated situations.
+
+Type-checked F* code can be converted to other languages for more convenient execution. One such target language is F\#, a general-purpose programming language \cite{fsharp}. The TMF921 Web API and shell processing is implemented in F\# which internally invokes F*. Both F* and F\# stem from the same lineage - ML \cite{milner_ml_polymorphism}. F\# can be considered a non-dependently typed version of F*. F\# thus can be the target of LLM-generated but F* - checked, more complex \textit{control code}.
+
 \begin{table}[t]
 \centering
 \caption{Official OpenAI-reported results on benchmarks with exact name overlap between GPT-4o and GPT-5.4 \cite{gpt54_openai,gpt41_openai,browsecomp_openai}.}
@@ -302,7 +306,7 @@ Using the final prompt version, the rerun achieved 300/300 successes on the firs
 
 \section{Limitations and Future Work}
 
-The current evidence is architectural rather than broad empirical. The natural-language handling is narrow, the provider model is simplified, and the evaluation covers a single scenario family. The next steps are to broaden the scenario set, connect admission checks to dynamic state, and compare proof-oriented admission more systematically against lighter-weight baselines.
+The current evidence is architectural rather than broad empirical. The natural-language handling is narrow, the provider model is simplified, and the evaluation covers limited scenario families. The next steps are to broaden the scenario set, connect admission checks to dynamic state via \textit{control code} generation to understand the power and limits of LLM-generated but proof-validated code.
 
 \section{Related Work}
 

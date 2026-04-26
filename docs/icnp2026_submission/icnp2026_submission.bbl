@@ -212,6 +212,20 @@ C.~Barrett and C.~Tinelli, ``{Satisfiability Modulo Theories},'' in
   \url{https://lean-lang.org/doc/reference/latest/Tactic-Proofs/}
 \BIBentrySTDinterwordspacing
 
+\bibitem{fsharp}
+\BIBentryALTinterwordspacing
+{Microsoft}, ``{What is F\#?}'' 2026, accessed April 22, 2026. [Online].
+  Available:
+  \url{https://learn.microsoft.com/en-us/dotnet/fsharp/what-is-fsharp}
+\BIBentrySTDinterwordspacing
+
+\bibitem{milner_ml_polymorphism}
+\BIBentryALTinterwordspacing
+R.~Milner, ``{A Theory of Type Polymorphism in Programming},'' \emph{Journal of
+  Computer and System Sciences}, vol.~17, no.~3, pp. 348--375, 1978. [Online].
+  Available: \url{https://doi.org/10.1016/0022-0000(78)90014-4}
+\BIBentrySTDinterwordspacing
+
 \bibitem{gpt54_openai}
 \BIBentryALTinterwordspacing
 {OpenAI}, ``{Introducing GPT-5.4},'' 2026, published March 5, 2026; accessed
