@@ -1,0 +1,4 @@
+interface:
+  display_name: "TeX PDF Build"
+  short_description: "Regenerate project PDFs from LaTeX sources."
+  default_prompt: "Regenerate the PDF from the project LaTeX source and verify the output exists."
