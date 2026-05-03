@@ -26,10 +26,8 @@
 \citation{mathematics_in_lean,lean4_theorem_prover}
 \citation{fstar_popl,z3_smt_solver,smt_barrett_tinelli}
 \citation{lean4_theorem_prover,lean_tactic_reference}
-\newlabel{lst:simple-function}{{1}{2}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1}Simple function type in F*.}{2}{}\protected@file@percent }
-\newlabel{lst:dependent-function}{{2}{2}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {2}More complex dependent function type in F*.}{2}{}\protected@file@percent }
+\newlabel{lst:dependent-type-sketch}{{1}{2}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1}Small F* dependent-type sketch.}{2}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {II}Dependent Types and Proof-Oriented Validation}{2}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {III}The Unreasonable Effectiveness of Dependent Types}{2}{}\protected@file@percent }
 \citation{fsharp}
@@ -42,27 +40,25 @@
 \@writefile{toc}{\contentsline {section}{\numberline {V}Example Ontology Fragment and Refinement}{3}{}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Online TMF921 intent-admission pipeline. The standards-aligned gate checks whether the request is actionable under the ontology-derived dependent types; provider refinements then check local admissibility constraints.}}{3}{}\protected@file@percent }
 \newlabel{fig:processing-pipeline}{{1}{3}{}{}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Compact ontology fragment used by the case study. An intent is interpreted as a conjunction of delivery, property, and reporting expectations over a target. Property expectations reduce to checked conditions over quantities; temporal context and policy posture constrain admissibility.}}{4}{}\protected@file@percent }
-\newlabel{fig:ontology-fragment}{{2}{4}{}{}{}}
-\newlabel{lst:common-core}{{3}{4}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {3}Simplified common-core F* excerpt derived from the ontology fragment.}{4}{}\protected@file@percent }
-\newlabel{lst:provider-refinement}{{4}{4}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {4}Simplified provider refinement excerpt for live broadcast admission.}{4}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {VI}LLM Performance and Observations}{4}{}\protected@file@percent }
 \citation{ciri}
 \citation{firewall_nl}
 \citation{mtp}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces TMF921/TIO ontology fragment for the Detroit Stadium intent. The nodes are standards-level concepts carried by the TMF921 intent resource and expression field; the small text shows demo values that inhabit those slots. Provider profiles and admission thresholds are not part of this ontology fragment.}}{4}{}\protected@file@percent }
+\newlabel{fig:ontology-fragment}{{2}{4}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}LLM Performance and Observations}{4}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces End-to-end GPT-5.4 results on 10 accepted synthetic expressions, repeated 30 times each.}}{4}{}\protected@file@percent }
+\newlabel{tab:llm-performance}{{II}{4}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Limitations and Future Work}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Related Work}{4}{}\protected@file@percent }
 \citation{security_principles}
 \citation{confucius}
-\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces End-to-end GPT-5.4 results on 10 accepted synthetic expressions, repeated 30 times each.}}{5}{}\protected@file@percent }
-\newlabel{tab:llm-performance}{{II}{5}{}{}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Limitations and Future Work}{5}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {VIII}Related Work}{5}{}\protected@file@percent }
+\newlabel{lst:common-core}{{2}{5}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {2}Simplified TMF921/TIO F* types for the ontology fragment.}{5}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {IX}Conclusion}{5}{}\protected@file@percent }
+\newlabel{lst:provider-refinement}{{3}{5}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {3}Provider-specific F* refinement types over the TMF921 types.}{5}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{Appendix\nobreakspace  A: Prompts}{5}{}\protected@file@percent }
 \newlabel{app:llm-prompt}{{A}{5}{}{}{}}
-\newlabel{lst:llm-system-prompt}{{5}{5}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {5}System prompt for version 2026-04-23.fstar-intent.v2.}{5}{}\protected@file@percent }
 \bibstyle{IEEEtran}
 \bibdata{icnp2026_submission}
 \bibcite{ciri}{1}
@@ -73,6 +69,11 @@
 \bibcite{tmf921_api_page}{6}
 \bibcite{fstar_site}{7}
 \bibcite{fstar_popl}{8}
+\newlabel{lst:llm-system-prompt}{{4}{6}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {4}System prompt for version 2026-04-23.fstar-intent.v2.}{6}{}\protected@file@percent }
+\newlabel{lst:llm-user-prompt}{{5}{6}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {5}User-message template paired with the system prompt.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{6}{}\protected@file@percent }
 \bibcite{tr290a}{9}
 \bibcite{tr292d}{10}
 \bibcite{jsonld11}{11}
@@ -88,9 +89,6 @@
 \bibcite{imo_official}{21}
 \bibcite{gemini_deep_think_imo}{22}
 \bibcite{tulu3_rlvr}{23}
-\newlabel{lst:llm-user-prompt}{{6}{6}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {6}User-message template paired with the system prompt.}{6}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{References}{6}{}\protected@file@percent }
 \bibcite{process_verified_rl_lean}{24}
 \bibcite{lean4_theorem_prover}{25}
 \bibcite{z3_smt_solver}{26}

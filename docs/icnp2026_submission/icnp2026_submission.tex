@@ -48,15 +48,13 @@ Natural language (NL) intents will be increasingly the control mechanism of 5G/6
 
 Example intent: ``\textit{Provide an ultra-reliable low-latency 5G service for telemedicine and critical care operations at Mayo Clinic on an ongoing basis. Support up to 80 critical devices and 200 auxiliary endpoints. Maintain end-to-end latency below 10 ms \ldots}''
 
-This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive at the management plane, but they can be ambiguous, under-specified, and may not validate against additional provider-specific operational constraints.
+This shift creates a safety and reliability problem: natural-language or weakly structured intents are attractive because they are easy to express, but they can be ambiguous or under-specified. How to ensure NL intents are complete and sound? This paper specifically addresses this question and in doing so addresses the broader question of how to extract trusted, deterministic content from non-deterministic human and/or Large Language Model (LLM) generated content over an expansive domain of discourse.
 
-This paper presents a prototype, high-assurance, intent-admission shell for autonomous networks built around the TM Forum TMF921 Intent Management API, which serves as a ``front door'' for NL intents and as such imposes the minimal semantic requirements through an OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by the ontology.
+This paper presents a prototype, high-assurance implementation of the TM Forum TMF921 Intent Management API standard through which autonomous-network control intents are to be submitted. TM Forum is a telecom standards body that defines a large surface area of telecom operation APIs. TMF921 imposes the minimal semantic requirements through an OWL ontology. However any specific telecom provider implementation of TMF921 will have additional requirements that are not covered by the ontology. We also demonstrate provider-specific intent validation via further refinements of the ontology-projected artifacts.
 
-This paper shows how natural-language intents can be trusted through proof-relevant guarantees provided by formal verification systems based on dependently typed languages. First (offline) the OWL ontology is converted into the corresponding dependent types of the F* language. These serve as propositions against which incoming intents may be checked. Then (online) received natural-language intents are translated by a Large Language Model (LLM) to F* code that is validated (type-checked) against the ontology-derived dependent types using the F* proof checker. Only valid intents are admitted.
+This paper shows how NL intents can be trusted through proof-relevant guarantees provided by formal verification systems based on dependently typed languages. First (offline) the OWL ontology is projected into dependent types of the F* language. Then additional refined types are added to capture provider-specific constraints. These serve as propositions against which incoming intents are checked. Then (online) received natural-language intents are translated by a LLM to F* code that is validated (type-checked) against the ontology-derived dependent types using the F* proof checker. Only valid intents are admitted.
 
-Further, since TMF921 structure-imposition is necessarily generic, we demonstrate provider-specific intent validation via further refinements of the ontology types.
-
-It is observed that valid intents can be processed with high reliability after mild prompt tuning. On a 300-trial evaluation over ten semantically correct expressions, GPT-5.4 achieved 100\% first-attempt success in generating F* artifacts that passed the proof-oriented checks.
+Can contemporary LLMs generate intent-capturing F* code reliably enough to be practical? We observed that valid intents can be processed with high reliability after only mild prompt tuning. On a 300-trial evaluation over ten semantically correct expressions, GPT-5.4 achieved 100\% first-attempt success in generating F* artifacts that passed the proof-oriented checks.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -69,57 +67,43 @@ Autonomous networks are a particularly demanding instance of a broader systems p
 
 At this boundary, two distinct sources of non-determinism must be controlled. The first is the natural-language request itself -- the same meaning can be conveyed in different surface forms. The second is the LLM-generated artifact used to interpret that request, whose output may vary across runs even when the intended meaning is unchanged. Proof-checked output validation counters both by accepting only interpretations that can be turned into the required machine-checkable artifact.
 
-This paper describes a prototype shell around the TM Forum \cite{tmforum_site} TMF921 Intent Management API \cite{tmf921_api_page} that addresses this admission problem. TMF921 allows for intent submission in natural language, structured JSON, or weakly structured JSON formats. Here the focus is on the natural-language path.
+This paper describes a prototype implementation of the TM Forum \cite{tmforum_site} TMF921 Intent Management API \cite{tmf921_api_page} that addresses this admission problem. TMF921 allows for intent submission in natural language and JSON-structured formats. Here the focus is on the natural-language path.
 
-First, offline, the TM Forum intent ontology is projected into F* \cite{fstar_site,fstar_popl} dependent types that capture the standards-aligned semantics of the API \cite{tr290a,tr292d}. Then, online, incoming requests at the TMF921 boundary are normalized and, for the natural-language path, translated by an LLM into F* artifacts that must type-check against that ontology-derived layer before admission. Around that checked path, the system emits a canonical intent intermediate representation (IR), normalized JSON-LD \cite{jsonld11}, generated F* modules and other items for traceability and diagnostics.
+First, offline, the TM Forum intent ontology is projected into F* \cite{fstar_site,fstar_popl} dependent types that capture the standards-aligned semantics of the ontology \cite{tr290a,tr292d}. This is a partial projection enough to demonstrate the ideas discussed in this paper. Then additional F* types are added that are refinements of the ontology-projected types, which capture additional constraints of a hypothetical telecom provider. Then, online, incoming requests at the TMF921 boundary are normalized and, for the natural-language path, translated by an LLM into F* artifacts that must type-check against that generated types before admission. Around that checked path, the system emits a canonical intent intermediate representation (IR), normalized JSON-LD \cite{jsonld11}, generated F* modules and other items for traceability and diagnostics.
 
 Our argument is not that formal methods alone solve autonomous-network safety, nor that natural-language interfaces should be avoided. Instead, we argue for a narrow and practical claim: the boundary between LLM generation and provider execution is the right place to combine standards-aligned API handling, semantic normalization, and machine-checked admissibility tests. Autonomous networking is the motivating domain here, but the pattern applies more generally wherever model-generated artifacts must be highly trusted before they can allocate resources, change policy, or trigger control-plane actions.
 
 \subsection{Contributions}
 
-This paper makes two main contributions:
+This paper makes two primary contributions:
 \begin{enumerate}
-\item It frames dependent-type, proof-oriented validation as an admission-layer pattern for high-trust LLM outputs and instantiates that pattern as a TMF921 compliant API \cite{tmf921_spec,tr292_tio}.
-\item It separates general intent validity from provider-specific admissibility, allowing failures such as under-specification, infeasible requests, and policy violations to be localized. This is achieved by successively refining the dependent types derived from the TM Forum ontology into provider-specific types. This system allows different providers to use the same standards-aligned core while layering on their own constraints.
+\item It establishes dependent-type, proof-oriented validation as an admission-layer pattern for ensuring high-trust LLM outputs. This approach is demonstrated in the context of autonomous-network intent validation via a TMF921-compliant API \cite{tmf921_spec,tr292_tio}.
+\item It demonstrates the expressive power of dependently typed languages for domain modeling. Provider-specific constraints are naturally captured through successive refinement of TMF921 ontology-derived types. More broadly, dependent types enable a level of compositionality and semantic precision not attainable with conventional strongly typed languages, business rules engines, or schema validation approaches such as JSON Schema. While OWL provides limited compositional constructs, it lacks equivalent guarantees of executable validation.
 \end{enumerate}
 
 \section{Dependent Types and Proof-Oriented Validation}
 
 Via the Curry--Howard correspondence \cite{propositions_as_types}, propositions can be represented as types and proofs as programs; in our setting, we encode the required intent obligations as F* types. Then, the LLM-generated artifact (\textit{the program}) is a candidate proof of those types. Successful type checking serves as machine-checked evidence of compliance. Practical proof-oriented systems such as Lean \cite{lean_theorem_prover} and F* \cite{fstar_popl} make this style of checked construction usable for real systems.
 
-To illustrate, consider a simple function type \texttt{T1} given in Listing~\ref{lst:simple-function}, whose inputs and outputs are natural numbers. 
+To illustrate, Listing~\ref{lst:dependent-type-sketch} starts with an ordinary function type and then adds a dependent type whose proposition depends on the value being checked.
 
-\begin{lstlisting}[style=fstar,caption={Simple function type in F*.},label={lst:simple-function}]
-//declare a function type that takes a nat and returns a nat
-type T1 = nat -> nat  
+\begin{lstlisting}[style=fstar,caption={Small F* dependent-type sketch.},label={lst:dependent-type-sketch}]
+// ordinary function type
+type T1 = nat -> nat
+let addOne : T1 = fun x -> x + 1
 
-//this function satisfies type T1 (as would many others)
-let addOne: T1 =  fun x -> x + 1  
+// dependent proposition over a value
+type Even (n:nat) = _:unit { n % 2 = 0 }
+
+// input and result must both satisfy Even
+type T2 = (x:nat{Even x}) -> nat{Even result}
+let addTwo : T2 = fun x -> x + 2
+
+// This would fail: it produces an odd result.
+// let addOneError : T2 = fun x -> x + 1
 \end{lstlisting}
 
-Since \texttt{T1} is \textit{inhabited} via the function \texttt{addOne}, it means that \texttt{addOne} is a proof of \texttt{T1}. So under Curry--Howard the type \texttt{T1} can be read as a proposition that is proven by the program \texttt{addOne}.
-
-Now let's consider a slightly more complex function type that accepts and returns even numbers. We can express this using dependent types given in Listing~\ref{lst:dependent-function}. Here, \texttt{Even n} is a dependent type that represents the proposition that a natural number is even. Subsequently, the function type \texttt{T2} requires that inputs and outputs should be of type \texttt{Even n}. 
-
-\begin{lstlisting}[style=fstar,caption={More complex dependent function type in F*.},label={lst:dependent-function}]
-//first define a dependent type for even numbers 
-//as a constraint on nat
-type Even (n:nat) = _:unit { n % 2 = 0 } 
-
-//then define a dependent function type that 
-//requires Even input and output
-type T2 = (x: nat{Even x}) -> nat{Even result}  
-
-//this function satisfies type T2 because it takes an 
-//even number and produces an even number
-let addTwo: T2 = fun x -> x + 2  
-
-//this function does NOT satisfy type T2 because it 
-//takes an even number but produces an odd number
-let addOneError: T2 = fun x -> x + 1  
-\end{lstlisting}
-
-The type \texttt{Even n} is a dependent type because it \textit{depends} on the \textit{value} \texttt{n} which is supplied from where the type is used. Here \texttt{n} in \texttt{Even n} is used in the constraint \texttt{n \% 2 = 0} that is part of the type declaration. In fact any arbitrary constraint can be used as part of a type declaration.
+Since \texttt{T1} is \textit{inhabited} via the function \texttt{addOne}, it means that \texttt{addOne} is a proof of \texttt{T1}. So under Curry--Howard the type \texttt{T1} can be read as a proposition that is proven by the program \texttt{addOne}. The type \texttt{Even n} is a dependent type because it \textit{depends} on the \textit{value} \texttt{n} which is supplied from where the type is used. Here \texttt{n} in \texttt{Even n} is used in the constraint \texttt{n \% 2 = 0} that is part of the type declaration. In fact any arbitrary constraint can be used as part of a type declaration.
 \textit{In summary, in a dependent type system, types can depend on values and other functions}. However, this simple explanation does not do justice to the full expressiveness of dependent types, but it gives a flavor of how they can encode constraints. In principle, dependently typed programming languages can encode any mathematical theorem expressible in the underlying formal language \cite{mathematics_in_lean}.
 
 It suffices to understand that a complex set of constraints can be encoded as dependent types. Even state machines can be encoded as types. The key point is that system (or business) constraints/rules can be \textit{modelled} as types. Then, the validation (of code that uses these types) is automatic via the proof-oriented type checkers. Non-dependently typed languages -- with simpler type checkers -- cannot express such constraints as types.
@@ -137,9 +121,9 @@ The likely involvement of dependently-typed languages in post-training of fronti
 
 While the dependently typed Lean language \cite{mathematics_in_lean,lean4_theorem_prover} is favored for LLM training, F* is more suited for automatic validation of LLM-generated artifacts because it supports a higher degree of proof automation. F* relies heavily on the Z3 satisfiability modulo theories (SMT) solver to automate proofs \cite{fstar_popl,z3_smt_solver,smt_barrett_tinelli}. Lean, on the other hand, was built as an interactive proof assistant and is oriented toward human-assisted proof construction using \textit{tactics} \cite{lean4_theorem_prover,lean_tactic_reference}.
 
-The F* type checker statically analyzes source code to prove correctness. As such it can handle much more complexity than what its taxed with when validating TMF921 intents. However these simple, declarative intents actually drive complex \textit{control code} to manage dynamic networks. There is no reason why LLM code generation cannot be taken further to generate the actual \textit{control code} from the parsed intents. Type-based checks and balances can still apply but at a more granular level allowing for  composable constraints enabling flexible intent expressions to possibly handle previously unanticipated situations.
+The F* type checker enables static, proof-oriented validation of program correctness and is capable of handling significantly greater complexity than that required for TMF921 intent validation. Although the intents are declarative and relatively simple, they ultimately drive complex \textit{control code} for managing dynamic networks. This suggests a possible extension in which LLM-based generation is applied beyond intent parsing to the synthesis of \textit{control code}. Type-based validation could then be enforced at finer levels of granularity, supporting compositional constraints and enabling intent expressions to accommodate previously unanticipated scenarios.
 
-Type-checked F* code can be converted to other languages for more convenient execution. One such target language is F\#, a general-purpose programming language \cite{fsharp}. The TMF921 Web API and shell processing is implemented in F\# which internally invokes F*. Both F* and F\# stem from the same lineage - ML \cite{milner_ml_polymorphism}. F\# can be considered a non-dependently typed version of F*. F\# thus can be the target of LLM-generated but F* - checked, more complex \textit{control code}.
+Type-checked F* programs can be extracted to other languages for practical execution. One such target is F\#, a general-purpose functional programming language \cite{fsharp}. In our implementation, the TMF921 Web API and shell processing are written in F\#, which internally invokes F* for validation. Both F* and F\# share a common lineage in the ML family of languages \cite{milner_ml_polymorphism}. F\# can be viewed as a non-dependently typed counterpart to F*, making it a suitable execution target for LLM-generated, F*-verified \textit{control code}.
 
 \begin{table}[t]
 \centering
@@ -205,7 +189,7 @@ To illustrate the projection and refinement process, consider a live-broadcast s
 
 \par\indent ``\textit{Provide a premium 5G broadcast service for the live event at Detroit Stadium on April 25, 2026 from 18:00 to 22:00 EST. Support up to 200 production devices. Keep uplink latency under 20 ms. Send hourly compliance updates and immediate alerts if service quality degrades. Do not impact emergency-service traffic.}''
 
-Figure~\ref{fig:ontology-fragment} shows the compact ontology fragment used to interpret this request. The fragment is intentionally small: an intent has a target (one or more services), a delivery window, measurable quantities, a reporting expectation, and a safety or security posture. For the live-broadcast scenario, these fields are enough to distinguish a vague request from an actionable intent without exposing the reader to the full ontology.
+Figure~\ref{fig:ontology-fragment} shows the compact TMF921/TIO derived fragment used to interpret this request. The fragment is representative but not a precise depiction. The diagram is standards-oriented rather than provider-oriented: it contains the TMF921 intent resource and expression envelope, then the ontology-level target, service class, expectations, quantities, reporting, and security posture needed by the Detroit Stadium demo. It deliberately excludes the provider profile, capacity ceiling, and local admission thresholds, which are introduced only as refinements in Listing~\ref{lst:provider-refinement}.
 
 \begin{figure*}[t]
 \centering
@@ -216,136 +200,163 @@ Figure~\ref{fig:ontology-fragment} shows the compact ontology fragment used to i
     rounded corners,
     align=center,
     font=\scriptsize,
-    minimum width=25mm,
+    minimum width=27mm,
     minimum height=8mm
   },
-  core/.style={box, fill=blue!7},
+  api/.style={box, fill=blue!7},
+  tio/.style={box, fill=green!7},
   exp/.style={box, fill=orange!10},
-  aux/.style={box, fill=green!7},
   q/.style={box, fill=purple!7},
-  arrow/.style={-Latex, thick},
-  constraint/.style={-Latex, thick, dashed}
+  arrow/.style={-Latex, thick}
 ]
 
-\node[core] (intent) at (0,3.5) {Intent\\\texttt{icm:Intent}};
-\node[core] (expectation) at (0,2.4) {Expectation\\\texttt{icm:Expectation}};
-\node[aux] (target) at (-4.2,2.4) {Target\\\texttt{icm:Target}};
+\node[api] (resource) at (0,4.2)
+  {TMF921 Intent\\resource\\\texttt{Intent}};
+\node[api] (envelope) at (0,3.0)
+  {TMF921 expression\\envelope\\\texttt{expression}};
+\node[tio] (expr) at (0,1.8)
+  {TIO intent expression\\\texttt{icm:IntentExpression}};
 
-\node[exp] (delivery) at (-4.2,0.6)
-  {Delivery\\Expectation\\\texttt{icm:DeliveryExpectation}};
-\node[exp] (property) at (0,0.6)
-  {Property\\Expectation\\\texttt{icm:PropertyExpectation}};
-\node[exp] (reporting) at (4.2,0.6)
-  {Reporting\\Expectation\\\texttt{icm:ReportingExpectation}};
+\node[tio] (target) at (-6.2,0.25)
+  {Target descriptor\\\texttt{icm:Target}\\{\tiny Detroit Stadium / venue}};
+\node[tio] (service) at (-2.1,0.25)
+  {Service class\\\texttt{icm:Service}\\{\tiny premium 5G broadcast}};
+\node[exp] (expectation) at (2.1,0.25)
+  {Expectation set\\\texttt{log:allOf}};
+\node[tio] (security) at (6.2,0.25)
+  {Security posture\\\texttt{TR292I}\\{\tiny emergency traffic preserved}};
 
-\node[q] (condition) at (0,-1.0)
-  {Condition\\\texttt{log:Condition}};
-\node[q] (quantity) at (0,-2.2)
-  {Quantity\\\texttt{quan:Quantity}};
+\node[exp] (delivery) at (-2.1,-1.35)
+  {Delivery\\expectation\\{\tiny Apr. 25, 2026}\\{\tiny 18:00--22:00}};
+\node[exp] (property) at (2.1,-1.35)
+  {Property\\expectation\\metric condition};
+\node[exp] (reporting) at (6.2,-1.35)
+  {Reporting\\expectation\\{\tiny 60-min reports}\\{\tiny immediate alerts}};
+\node[q] (quantity) at (2.1,-2.65)
+  {Quantity\\\texttt{quan:Quantity}\\{\tiny 200 devices}\\{\tiny latency $\leq 20$ ms}};
 
-\node[aux] (policy) at (7.8,-0.8)
-  {Safety / Policy\\\texttt{TR292 extension}};
-\node[aux] (time) at (-7.8,0.6)
-  {Delivery Window\\\texttt{time:TemporalEntity}};
-
-\draw[arrow] (intent) -- (expectation);
-
+\draw[arrow] (resource) -- (envelope);
+\draw[arrow] (envelope) -- (expr);
+\draw[arrow] (expr) -- (target);
+\draw[arrow] (expr) -- (service);
+\draw[arrow] (expr) -- (expectation);
+\draw[arrow] (expr) -- (security);
 \draw[arrow] (expectation) -- (delivery);
 \draw[arrow] (expectation) -- (property);
 \draw[arrow] (expectation) -- (reporting);
-\node[font=\tiny, fill=white, inner sep=1pt] at (0.9,1.45) {\texttt{log:allOf}};
-\draw[arrow] (expectation) -- node[above,font=\tiny] {\texttt{icm:target}} (target);
-
-\draw[arrow] (delivery) -- node[left,font=\tiny] {\texttt{deliveryType}} (target);
-\draw[arrow] (property) -- (condition);
-\draw[arrow] (condition) -- node[right,font=\tiny] {\texttt{quan:*}} (quantity);
-
-\draw[constraint] (time) -- (delivery);
-\draw[constraint] (policy.north) |- (reporting.east);
-\draw[constraint] (policy.west) -- ++(-1.4,0) -- (property.south east);
+\draw[arrow] (property) -- (quantity);
 
 \end{tikzpicture}%
 }
-\caption{Compact ontology fragment used by the case study. An intent is interpreted as a conjunction of delivery, property, and reporting expectations over a target. Property expectations reduce to checked conditions over quantities; temporal context and policy posture constrain admissibility.}
+\caption{TMF921/TIO ontology fragment for the Detroit Stadium intent. The nodes are standards-level concepts carried by the TMF921 intent resource and expression field; the small text shows demo values that inhabit those slots. Provider profiles and admission thresholds are not part of this ontology fragment.}
 \label{fig:ontology-fragment}
 \end{figure*}
 
-Listing~\ref{lst:common-core} is an elided but still representative view of the projection of the common-core into F* types: the request must name a target and service, provide a complete window and reporting expectation, and attach positive measurable quantities. The \texttt{quantity\_checked\_intent} type is a refinement of the \texttt{measurable\_intent} type (plus other constraints). The LLM-generated \texttt{raw\_tm\_intent}, from the input expression, is further refined by \texttt{quantity\_checked\_intent}. When full F* code is assembled, the type checker will reject any intent that fails to meet the common-core requirements. 
+Listing~\ref{lst:common-core} gives a simplified F* projection of the same standards-level ontology fragment. The request must name a target and service, provide a complete delivery window and reporting expectation, and attach positive measurable quantities. The listing stops at \texttt{measured\_tmf921\_intent}; no provider profile, venue-specific limit, or local admission policy appears in this type layer.
 
-\begin{lstlisting}[style=fstar,caption={Simplified common-core F* excerpt derived from the ontology fragment.},label={lst:common-core}]
-let structural_ok (i:raw_tm_intent) : Type0 =
-  let e = intent_expression_of i in
-  let m = metric_requirements_of i in
-  target_present e.projection_target /\
-  service_present e.projection_service_class /\
-  delivery_window_present e.projection_delivery_window /\
-  reporting_expectation_present e.projection_reporting /\
-  required_metrics_present
-    (requires_auxiliary_metric i)
-    m
+\begin{lstlisting}[style=fstar,caption={Simplified TMF921/TIO F* types for the ontology fragment.},label={lst:common-core}]
+open TR290A
+open TR292G
+open TR292I
 
-let quantities_ok (i:raw_tm_intent) : Type0 =
-  all_quantities_positive
-    (requires_auxiliary_metric i)
-    (primary_device_quantity_of i)
-    (auxiliary_endpoint_quantity_of i)
-    (max_latency_quantity_of i)
-    (reporting_interval_quantity_of i)
+type tmf921_target_kind =
+  | VenueTarget
+  | FacilityTarget
 
-let provider_ok (p:profile) (i:raw_tm_intent) : Type0 =
-  window_ok i /\
-  profile_matches p i /\
-  capacity_ok p i /\
-  latency_ok p i /\
-  policy_ok i
+type tmf921_intent_expression = {
+  target:target_descriptor tmf921_target_kind;
+  service_class:option string;
+  delivery:delivery_window;
+  metrics:metric_requirements;
+  reporting:reporting_expectation;
+  security:security_posture
+}
 
-type structurally_actionable_intent =
-  i:raw_tm_intent { structural_ok i }
+type tmf921_intent = {
+  intent_name:string;
+  expression:tmf921_intent_expression
+}
 
-type quantity_wellformed_intent =
-  i:structurally_actionable_intent { quantities_ok i }
+let positive (v:option nat) : bool =
+  match v with | Some n -> n > 0 | None -> false
 
-type provider_admissible_intent (p:profile) =
-  i:quantity_wellformed_intent { provider_ok p i }
-}\end{lstlisting}
+let ontology_complete (i:tmf921_intent) : bool =
+  let e = i.expression in
+  target_present e.target &&
+  service_present e.service_class &&
+  delivery_window_present e.delivery &&
+  reporting_expectation_present e.reporting &&
+  required_metrics_present false e.metrics
 
-Provider checks are then layered on top of the common core. In the running live-broadcast example, Detroit Stadium resolves to the \texttt{LiveBroadcastGold} profile, which admits at most 250 production devices and requires a latency bound no tighter than 20 ms. The accepted scenario requests 200 devices, 20 ms uplink latency, hourly reporting, 
-immediate degradation alerts, and no emergency-traffic preemption.
+let quantities_ok (i:tmf921_intent) : bool =
+  let m = i.expression.metrics in
+  positive m.metric_primary_device_count &&
+  positive m.metric_latency_bound_ms &&
+  positive m.metric_reporting_interval_minutes
 
-\begin{lstlisting}[style=fstar,caption={Simplified provider refinement excerpt for live broadcast admission.},label={lst:provider-refinement}]
-type profile =
-  | LiveBroadcastSilver
+type actionable_tmf921_intent =
+  i:tmf921_intent { ontology_complete i }
+
+type measured_tmf921_intent =
+  i:actionable_tmf921_intent { quantities_ok i }
+\end{lstlisting}
+
+Provider checks are then layered on top of the TMF921/TIO types. In the running live-broadcast example, Detroit Stadium resolves to the \texttt{LiveBroadcastGold} profile, which admits at most 250 production devices, requires a latency bound no tighter than 20 ms, and accepts the requested 60-minute reporting interval. These constraints are not part of the standards-level ontology; they are local refinements over \texttt{measured\_tmf921\_intent}.
+
+\begin{lstlisting}[style=fstar,caption={Provider-specific F* refinement types over the TMF921 types.},label={lst:provider-refinement}]
+type provider_profile =
   | LiveBroadcastGold
   | UnsupportedProfile
 
-let resolve_profile (i:raw_tm_intent) : profile =
-  match i.scenario_family,
-        (target_descriptor_of i).descriptor_name with
-  | BroadcastFamily, Some "Detroit Stadium" ->
-      LiveBroadcastGold
-  | BroadcastFamily, Some "Metro Arena" ->
-      LiveBroadcastSilver
-  | _ ->
-      UnsupportedProfile
+let resolve_profile
+  (i:measured_tmf921_intent) : provider_profile =
+  match i.expression.target.descriptor_name with
+  | Some "Detroit Stadium" -> LiveBroadcastGold
+  | _ -> UnsupportedProfile
 
-let profile_matches (p:profile) (i:raw_tm_intent) : Type0 =
-  resolve_profile i == p /\ p <> UnsupportedProfile
+let profile_matches
+  (p:provider_profile)
+  (i:measured_tmf921_intent) : bool =
+  resolve_profile i = p && p <> UnsupportedProfile
 
-type window_checked_intent =
-  i:quantity_wellformed_intent {
-    window_ok i
-  }
+let provider_capacity_ok
+  (p:provider_profile)
+  (i:measured_tmf921_intent) : bool =
+  match p, i.expression.metrics.metric_primary_device_count with
+  | LiveBroadcastGold, Some n -> n <= 250
+  | _, _ -> false
 
-type profiled_intent (p:profile) =
-  i:window_checked_intent {
-    profile_matches p i
-  }
+let provider_latency_ok
+  (p:provider_profile)
+  (i:measured_tmf921_intent) : bool =
+  match p, i.expression.metrics.metric_latency_bound_ms with
+  | LiveBroadcastGold, Some ms -> 20 <= ms
+  | _, _ -> false
 
-type provider_checked_intent (p:profile) =
+let provider_reporting_ok
+  (p:provider_profile)
+  (i:measured_tmf921_intent) : bool =
+  match p, i.expression.reporting.expected_interval_minutes with
+  | LiveBroadcastGold, Some minutes -> 15 <= minutes
+  | _, _ -> false
+
+let provider_policy_ok
+  (i:measured_tmf921_intent) : bool =
+  let s = i.expression.security in
+  i.expression.reporting.requires_immediate_alerts &&
+  s.declared_safety_policy &&
+  s.preserves_emergency_traffic &&
+  not s.requests_public_safety_preemption
+
+type profiled_intent (p:provider_profile) =
+  i:measured_tmf921_intent { profile_matches p i }
+
+type provider_checked_intent (p:provider_profile) =
   i:profiled_intent p {
-    capacity_ok p i /\
-    latency_ok p i /\
-    policy_ok i
+    provider_capacity_ok p i &&
+    provider_latency_ok p i &&
+    provider_reporting_ok p i &&
+    provider_policy_ok i
   }
 \end{lstlisting}
 
