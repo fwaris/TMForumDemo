@@ -14,10 +14,6 @@ module DemoScenarios =
         | DemoRejectTm
         | DemoRejectProvider
 
-    type ProviderProfile =
-        | LiveBroadcastSilver
-        | LiveBroadcastGold
-
     type ValidationIssue =
         { Code: string
           Message: string }
@@ -631,45 +627,6 @@ module DemoScenarios =
 
         issues |> List.distinctBy (fun value -> value.Code, value.Message)
 
-    let private profileForVenue venue =
-        match venue with
-        | "Detroit Stadium" -> Some LiveBroadcastGold
-        | "Metro Arena" -> Some LiveBroadcastSilver
-        | _ -> None
-
-    let private profileName profile =
-        match profile with
-        | LiveBroadcastSilver -> "LiveBroadcastSilver"
-        | LiveBroadcastGold -> "LiveBroadcastGold"
-
-    let private profileConstructor profile =
-        match profile with
-        | LiveBroadcastSilver -> "LiveBroadcastSilver"
-        | LiveBroadcastGold -> "LiveBroadcastGold"
-
-    let private profileFromIntent intent =
-        intent.Venue |> Option.bind profileForVenue
-
-    let private maxDevices profile =
-        match profile with
-        | LiveBroadcastSilver -> 100
-        | LiveBroadcastGold -> 250
-
-    let private minLatencyBound profile =
-        match profile with
-        | LiveBroadcastSilver -> 40
-        | LiveBroadcastGold -> 20
-
-    let private providerWindowOk intent =
-        match intent.StartHour, intent.EndHour with
-        | Some startHour, Some endHour -> startHour >= 6 && endHour <= 23
-        | _ -> false
-
-    let private reportingOk intent =
-        match intent.ReportingIntervalMinutes with
-        | Some minutes -> minutes >= 15
-        | None -> false
-
     let validateProviderIntent (intent: DemoTmIntent) =
         let restricted = restrictedFromDemoIntent intent
 
@@ -895,17 +852,19 @@ module DemoScenarios =
         | Some number when number >= 0 -> $"Some {number}"
         | _ -> "None"
 
-    let private renderVenueOption (venue: string option) =
-        match venue with
-        | Some "Detroit Stadium" -> "Some DetroitStadium"
-        | Some "Metro Arena" -> "Some MetroArena"
-        | Some other -> $"Some (OtherVenue \"{fstarString other}\")"
-        | None -> "None"
+    let private renderBool (value: bool) =
+        (string value).ToLowerInvariant()
 
-    let private selectedProfileConstructor (intent: DemoTmIntent) =
-        match profileFromIntent intent with
-        | Some profile -> profileConstructor profile
-        | None -> "UnsupportedProfile"
+    let private renderScenarioFamilyValue (intent: DemoTmIntent) =
+        match intent.ScenarioFamily with
+        | Some "CriticalService" -> "CriticalServiceFamily"
+        | _ -> "BroadcastFamily"
+
+    let private renderTargetKindValue (intent: DemoTmIntent) =
+        match intent.TargetKind with
+        | Some "FacilityTarget" -> "Some FacilityTarget"
+        | Some "VenueTarget" -> "Some VenueTarget"
+        | _ -> "None"
 
     let private sanitizeModuleSegment (value: string) =
         let sanitized =
@@ -923,9 +882,15 @@ module DemoScenarios =
                 Some(date.ToString("MMMM", CultureInfo.InvariantCulture)), Some date.Day, Some date.Year
             | None -> None, None, None
 
-        $"""let {intentName} : tm_intent =
+        let primaryDeviceCount = intent.PrimaryDeviceCount |> optionOr intent.DeviceCount
+        let maxLatencyMs = intent.MaxLatencyMs |> optionOr intent.MaxUplinkLatencyMs
+        let targetName = intent.TargetName |> optionOr intent.Venue
+
+        $"""let {intentName} : raw_tm_intent =
   {{ intent_name = "{fstarString intent.IntentName}";
-    venue = {renderVenueOption intent.Venue};
+    scenario_family = {renderScenarioFamilyValue intent};
+    target_name = {renderOptionString targetName};
+    target_kind = {renderTargetKindValue intent};
     service_class = {renderOptionString intent.ServiceClass};
     event_month = {renderOptionString monthText};
     event_day = {renderOptionNat dayValue};
@@ -933,24 +898,27 @@ module DemoScenarios =
     start_hour = {renderOptionNat intent.StartHour};
     end_hour = {renderOptionNat intent.EndHour};
     timezone = {renderOptionString intent.Timezone};
-    device_count = {renderOptionNat intent.DeviceCount};
-    max_uplink_latency_ms = {renderOptionNat intent.MaxUplinkLatencyMs};
+    primary_device_count = {renderOptionNat primaryDeviceCount};
+    auxiliary_endpoint_count = {renderOptionNat intent.AuxiliaryEndpointCount};
+    max_latency_ms = {renderOptionNat maxLatencyMs};
     reporting_interval_minutes = {renderOptionNat intent.ReportingIntervalMinutes};
-    immediate_degradation_alerts = {string intent.ImmediateDegradationAlerts |> fun value -> value.ToLowerInvariant()};
-    preserve_emergency_traffic = {string intent.PreserveEmergencyTraffic |> fun value -> value.ToLowerInvariant()};
-    request_public_safety_preemption = {string intent.RequestsPublicSafetyPreemption |> fun value -> value.ToLowerInvariant()} }}"""
+    immediate_degradation_alerts = {renderBool intent.ImmediateDegradationAlerts};
+    safety_policy_declared = {renderBool intent.SafetyPolicyDeclared};
+    preserve_emergency_traffic = {renderBool intent.PreserveEmergencyTraffic};
+    request_public_safety_preemption = {renderBool intent.RequestsPublicSafetyPreemption} }}"""
 
     let private buildProviderFStarModule moduleName (intent: DemoTmIntent) =
         let intentBindingName = "demo_intent"
 
         $"""module {moduleName}
 
-open BroadcastProviderDemo
+open ProviderIntentAdmission
+open TmForumTr292CommonCore
 
 {renderProviderIntentRecord intentBindingName intent}
 
 let selected_profile : profile =
-  {selectedProfileConstructor intent}
+  resolve_profile {intentBindingName}
 
 let measurable : measurable_intent {intentBindingName} =
   mk_measurable {intentBindingName}
@@ -982,24 +950,30 @@ let admission_token_for_demo : admission_token selected_profile =
 
     let private runGeneratedProviderFStar moduleKey intent =
         let baseDir = fstarDemoDir ()
+        let libraryDir = fstarLibraryDir ()
         let generatedDir = fstarGeneratedDemoDir ()
-        let moduleName = $"BroadcastProviderDemo.Generated{sanitizeModuleSegment moduleKey}"
+        let moduleName = $"ProviderIntentAdmissionDemo.Generated{sanitizeModuleSegment moduleKey}"
         let filePath = Path.Combine(generatedDir, $"{moduleName}.fst")
         let moduleText = buildProviderFStarModule moduleName intent
 
         Directory.CreateDirectory(generatedDir) |> ignore
         File.WriteAllText(filePath, moduleText, Encoding.UTF8)
 
-        let arguments = $"--include \"{baseDir}\" --include \"{generatedDir}\" \"{filePath}\""
+        let arguments = $"--include \"{baseDir}\" --include \"{libraryDir}\" --include \"{generatedDir}\" \"{filePath}\""
         let exitCode, stdout, stderr = runProcess "fstar.exe" arguments
         let output = combineOutput stdout stderr
+        let resolvedProfile =
+            intent
+            |> restrictedFromDemoIntent
+            |> IntentAdmission.resolveProviderProfile
 
         { ActualSuccess = exitCode = 0
           Output = output
           GeneratedModule = moduleText
           AdmissionTokenType =
-            match exitCode = 0, profileFromIntent intent with
-            | true, Some profile -> Some $"admission_token {profileName profile}"
+            match exitCode = 0, resolvedProfile with
+            | true, IntentAdmission.UnsupportedProfile -> None
+            | true, profile -> Some $"admission_token {IntentAdmission.profileName profile}"
             | _ -> None }
 
     let private buildConstraintTrace

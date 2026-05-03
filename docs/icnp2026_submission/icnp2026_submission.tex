@@ -3,6 +3,8 @@
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
 \usepackage{listings}
 \usepackage{url}
 \def\UrlBreaks{\do\/\do-}
@@ -203,43 +205,109 @@ To illustrate the projection and refinement process, consider a live-broadcast s
 
 \par\indent ``\textit{Provide a premium 5G broadcast service for the live event at Detroit Stadium on April 25, 2026 from 18:00 to 22:00 EST. Support up to 200 production devices. Keep uplink latency under 20 ms. Send hourly compliance updates and immediate alerts if service quality degrades. Do not impact emergency-service traffic.}''
 
-Figure~\ref{fig:ontology-fragment} shows the compact ontology fragment used to interpret this request. The fragment is intentionally small: an intent has a target, a service class, a delivery window, measurable quantities, a reporting expectation, and a safety or security posture. For the live-broadcast scenario, these fields are enough to distinguish a vague request from an actionable intent without exposing the reader to the full ontology.
+Figure~\ref{fig:ontology-fragment} shows the compact ontology fragment used to interpret this request. The fragment is intentionally small: an intent has a target (one or more services), a delivery window, measurable quantities, a reporting expectation, and a safety or security posture. For the live-broadcast scenario, these fields are enough to distinguish a vague request from an actionable intent without exposing the reader to the full ontology.
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\linewidth]{tr290a_tr292d_fragment.pdf}
-\caption{Simplified class-level fragment used by the case study; adapted from TR290A Sections 2, 4, 5, 8, and 9 \cite{tr290a} and TR292D Sections 2 and 5 \cite{tr292d}. TMF921 provides the expression envelope used to carry this ontology content over the API \cite{tmf921_spec}.}
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={
+    draw,
+    rounded corners,
+    align=center,
+    font=\scriptsize,
+    minimum width=25mm,
+    minimum height=8mm
+  },
+  core/.style={box, fill=blue!7},
+  exp/.style={box, fill=orange!10},
+  aux/.style={box, fill=green!7},
+  q/.style={box, fill=purple!7},
+  arrow/.style={-Latex, thick},
+  constraint/.style={-Latex, thick, dashed}
+]
+
+\node[core] (intent) at (0,3.5) {Intent\\\texttt{icm:Intent}};
+\node[core] (expectation) at (0,2.4) {Expectation\\\texttt{icm:Expectation}};
+\node[aux] (target) at (-4.2,2.4) {Target\\\texttt{icm:Target}};
+
+\node[exp] (delivery) at (-4.2,0.6)
+  {Delivery\\Expectation\\\texttt{icm:DeliveryExpectation}};
+\node[exp] (property) at (0,0.6)
+  {Property\\Expectation\\\texttt{icm:PropertyExpectation}};
+\node[exp] (reporting) at (4.2,0.6)
+  {Reporting\\Expectation\\\texttt{icm:ReportingExpectation}};
+
+\node[q] (condition) at (0,-1.0)
+  {Condition\\\texttt{log:Condition}};
+\node[q] (quantity) at (0,-2.2)
+  {Quantity\\\texttt{quan:Quantity}};
+
+\node[aux] (policy) at (7.8,-0.8)
+  {Safety / Policy\\\texttt{TR292 extension}};
+\node[aux] (time) at (-7.8,0.6)
+  {Delivery Window\\\texttt{time:TemporalEntity}};
+
+\draw[arrow] (intent) -- (expectation);
+
+\draw[arrow] (expectation) -- (delivery);
+\draw[arrow] (expectation) -- (property);
+\draw[arrow] (expectation) -- (reporting);
+\node[font=\tiny, fill=white, inner sep=1pt] at (0.9,1.45) {\texttt{log:allOf}};
+\draw[arrow] (expectation) -- node[above,font=\tiny] {\texttt{icm:target}} (target);
+
+\draw[arrow] (delivery) -- node[left,font=\tiny] {\texttt{deliveryType}} (target);
+\draw[arrow] (property) -- (condition);
+\draw[arrow] (condition) -- node[right,font=\tiny] {\texttt{quan:*}} (quantity);
+
+\draw[constraint] (time) -- (delivery);
+\draw[constraint] (policy.north) |- (reporting.east);
+\draw[constraint] (policy.west) -- ++(-1.4,0) -- (property.south east);
+
+\end{tikzpicture}%
+}
+\caption{Compact ontology fragment used by the case study. An intent is interpreted as a conjunction of delivery, property, and reporting expectations over a target. Property expectations reduce to checked conditions over quantities; temporal context and policy posture constrain admissibility.}
 \label{fig:ontology-fragment}
-\end{figure}
+\end{figure*}
 
 Listing~\ref{lst:common-core} is an elided but still representative view of the projection of the common-core into F* types: the request must name a target and service, provide a complete window and reporting expectation, and attach positive measurable quantities. The \texttt{quantity\_checked\_intent} type is a refinement of the \texttt{measurable\_intent} type (plus other constraints). The LLM-generated \texttt{raw\_tm\_intent}, from the input expression, is further refined by \texttt{quantity\_checked\_intent}. When full F* code is assembled, the type checker will reject any intent that fails to meet the common-core requirements. 
 
 \begin{lstlisting}[style=fstar,caption={Simplified common-core F* excerpt derived from the ontology fragment.},label={lst:common-core}]
-type measurable_intent (i:raw_tm_intent) =
-  v:raw_tm_intent{
-    v == i /\
-    let expression = intent_expression_of v in
-    let metrics = metric_requirements_of v in
-    target_present expression.projection_target /\
-    service_present expression.projection_service_class /\
-    delivery_window_present expression.projection_delivery_window /\
-    reporting_expectation_present expression.projection_reporting /\
-    required_metrics_present
-      (requires_auxiliary_metric v) metrics
-  }
+let structural_ok (i:raw_tm_intent) : Type0 =
+  let e = intent_expression_of i in
+  let m = metric_requirements_of i in
+  target_present e.projection_target /\
+  service_present e.projection_service_class /\
+  delivery_window_present e.projection_delivery_window /\
+  reporting_expectation_present e.projection_reporting /\
+  required_metrics_present
+    (requires_auxiliary_metric i)
+    m
 
-type quantity_checked_intent (i:raw_tm_intent) =
-  v:raw_tm_intent{
-    v == i /\
-    measurable_intent v /\
-    all_quantities_positive
-      (requires_auxiliary_metric v)
-      (primary_device_quantity_of v)
-      (auxiliary_endpoint_quantity_of v)
-      (max_latency_quantity_of v)
-      (reporting_interval_quantity_of v)
-  }
-\end{lstlisting}
+let quantities_ok (i:raw_tm_intent) : Type0 =
+  all_quantities_positive
+    (requires_auxiliary_metric i)
+    (primary_device_quantity_of i)
+    (auxiliary_endpoint_quantity_of i)
+    (max_latency_quantity_of i)
+    (reporting_interval_quantity_of i)
+
+let provider_ok (p:profile) (i:raw_tm_intent) : Type0 =
+  window_ok i /\
+  profile_matches p i /\
+  capacity_ok p i /\
+  latency_ok p i /\
+  policy_ok i
+
+type structurally_actionable_intent =
+  i:raw_tm_intent { structural_ok i }
+
+type quantity_wellformed_intent =
+  i:structurally_actionable_intent { quantities_ok i }
+
+type provider_admissible_intent (p:profile) =
+  i:quantity_wellformed_intent { provider_ok p i }
+}\end{lstlisting}
 
 Provider checks are then layered on top of the common core. In the running live-broadcast example, Detroit Stadium resolves to the \texttt{LiveBroadcastGold} profile, which admits at most 250 production devices and requires a latency bound no tighter than 20 ms. The accepted scenario requests 200 devices, 20 ms uplink latency, hourly reporting, 
 immediate degradation alerts, and no emergency-traffic preemption.
@@ -250,28 +318,34 @@ type profile =
   | LiveBroadcastGold
   | UnsupportedProfile
 
-let resolve_profile i =
+let resolve_profile (i:raw_tm_intent) : profile =
   match i.scenario_family,
         (target_descriptor_of i).descriptor_name with
   | BroadcastFamily, Some "Detroit Stadium" ->
       LiveBroadcastGold
   | BroadcastFamily, Some "Metro Arena" ->
       LiveBroadcastSilver
-  | _ -> UnsupportedProfile
+  | _ ->
+      UnsupportedProfile
 
-type window_checked_intent (i:raw_tm_intent) =
-  v:raw_tm_intent{ v == i /\ quantity_checked_intent v /\ window_ok v }
+let profile_matches (p:profile) (i:raw_tm_intent) : Type0 =
+  resolve_profile i == p /\ p <> UnsupportedProfile
 
-type profiled_intent (p:profile) (i:raw_tm_intent) =
-  v:raw_tm_intent{ v == i /\ window_checked_intent v /\ profile_matches p v }
+type window_checked_intent =
+  i:quantity_wellformed_intent {
+    window_ok i
+  }
 
-type provider_checked_intent (p:profile) (i:raw_tm_intent) =
-  v:raw_tm_intent{
-    v == i /\
-    profiled_intent p v /\
-    capacity_ok p v /\
-    latency_ok p v /\
-    policy_ok v
+type profiled_intent (p:profile) =
+  i:window_checked_intent {
+    profile_matches p i
+  }
+
+type provider_checked_intent (p:profile) =
+  i:profiled_intent p {
+    capacity_ok p i /\
+    latency_ok p i /\
+    policy_ok i
   }
 \end{lstlisting}
 

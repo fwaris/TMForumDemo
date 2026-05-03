@@ -1043,6 +1043,11 @@ let {bindingName} : raw_tm_intent =
                 "MISSING_FSTAR_RECORD"
                 "The F* output must declare `let <name> : raw_tm_intent = { ... }`."
                 None
+        else if bindingMatch.Groups["binding"].Value <> "candidate_intent" then
+            parseError
+                "INVALID_FSTAR_BINDING"
+                "The F* output must declare `let candidate_intent : raw_tm_intent = { ... }`."
+                (Some bindingMatch.Groups["binding"].Value)
         else
             let body = bindingMatch.Groups["body"].Value
 
@@ -1171,29 +1176,33 @@ let {bindingName} : raw_tm_intent =
                             | _ -> None
                         | _ -> None
 
+                    let moduleName = moduleMatch.Groups["name"].Value
+
+                    let parsedIntent =
+                        { IntentName = intentName
+                          ScenarioFamily = scenarioFamily
+                          TargetName = targetName
+                          TargetKind = targetKind
+                          ServiceClass = serviceClass
+                          EventDate = eventDate
+                          StartHour = startHour
+                          EndHour = endHour
+                          Timezone = timezone
+                          PrimaryDeviceCount = primaryDeviceCount
+                          AuxiliaryEndpointCount = auxiliaryEndpointCount
+                          MaxLatencyMs = maxLatencyMs
+                          ReportingIntervalMinutes = reportingIntervalMinutes
+                          ImmediateDegradationAlerts = immediateDegradationAlerts
+                          SafetyPolicyDeclared = safetyPolicyDeclared
+                          PreserveEmergencyTraffic = preserveEmergencyTraffic
+                          RequestPublicSafetyPreemption = requestPublicSafetyPreemption
+                          SourceText = None }
+
                     Ok
-                        { ModuleName = moduleMatch.Groups["name"].Value
-                          IntentBindingName = bindingMatch.Groups["binding"].Value
-                          Intent =
-                            { IntentName = intentName
-                              ScenarioFamily = scenarioFamily
-                              TargetName = targetName
-                              TargetKind = targetKind
-                              ServiceClass = serviceClass
-                              EventDate = eventDate
-                              StartHour = startHour
-                              EndHour = endHour
-                              Timezone = timezone
-                              PrimaryDeviceCount = primaryDeviceCount
-                              AuxiliaryEndpointCount = auxiliaryEndpointCount
-                              MaxLatencyMs = maxLatencyMs
-                              ReportingIntervalMinutes = reportingIntervalMinutes
-                              ImmediateDegradationAlerts = immediateDegradationAlerts
-                              SafetyPolicyDeclared = safetyPolicyDeclared
-                              PreserveEmergencyTraffic = preserveEmergencyTraffic
-                              RequestPublicSafetyPreemption = requestPublicSafetyPreemption
-                              SourceText = None }
-                          SourceText = moduleText }
+                        { ModuleName = moduleName
+                          IntentBindingName = "candidate_intent"
+                          Intent = parsedIntent
+                          SourceText = buildCandidateModule moduleName parsedIntent }
 
     let private fstarLibraryDir () =
         Path.Combine(repoRoot (), "Tmf921.IntentManagement.Api", "FStar")
@@ -1248,54 +1257,48 @@ let {bindingName} : raw_tm_intent =
 
     let private buildTmWitnessModule candidate =
         let moduleName = $"{candidate.ModuleName}_TmWitness"
-        let binding = candidate.IntentBindingName
+        let candidateTerm = $"{candidate.ModuleName}.{candidate.IntentBindingName}"
         let text =
             $"""module {moduleName}
 
-open TmForumTr292CommonCore
-open {candidate.ModuleName}
+let measurable_witness : TmForumTr292CommonCore.measurable_intent {candidateTerm} =
+  TmForumTr292CommonCore.mk_measurable {candidateTerm}
 
-let measurable_witness : measurable_intent {binding} =
-  mk_measurable {binding}
-
-let quantity_witness : quantity_checked_intent {binding} =
-  mk_quantity_checked {binding}
+let quantity_witness : TmForumTr292CommonCore.quantity_checked_intent {candidateTerm} =
+  TmForumTr292CommonCore.mk_quantity_checked {candidateTerm}
 """
 
         moduleName, text
 
     let private buildProviderWitnessModule candidate =
         let moduleName = $"{candidate.ModuleName}_ProviderWitness"
-        let binding = candidate.IntentBindingName
+        let candidateTerm = $"{candidate.ModuleName}.{candidate.IntentBindingName}"
         let text =
             $"""module {moduleName}
 
-open ProviderIntentAdmission
-open {candidate.ModuleName}
+let window_witness : ProviderIntentAdmission.window_checked_intent {candidateTerm} =
+  ProviderIntentAdmission.mk_window_checked {candidateTerm}
 
-let window_witness : window_checked_intent {binding} =
-  mk_window_checked {binding}
+let selected_profile : ProviderIntentAdmission.profile =
+  ProviderIntentAdmission.resolve_profile {candidateTerm}
 
-let selected_profile : profile =
-  resolve_profile {binding}
+let profiled_witness : ProviderIntentAdmission.profiled_intent selected_profile {candidateTerm} =
+  ProviderIntentAdmission.mk_profiled selected_profile {candidateTerm}
 
-let profiled_witness : profiled_intent selected_profile {binding} =
-  mk_profiled selected_profile {binding}
+let capacity_witness : ProviderIntentAdmission.capacity_checked_intent selected_profile {candidateTerm} =
+  ProviderIntentAdmission.mk_capacity_checked selected_profile {candidateTerm}
 
-let capacity_witness : capacity_checked_intent selected_profile {binding} =
-  mk_capacity_checked selected_profile {binding}
+let latency_witness : ProviderIntentAdmission.latency_checked_intent selected_profile {candidateTerm} =
+  ProviderIntentAdmission.mk_latency_checked selected_profile {candidateTerm}
 
-let latency_witness : latency_checked_intent selected_profile {binding} =
-  mk_latency_checked selected_profile {binding}
+let policy_witness : ProviderIntentAdmission.policy_checked_intent selected_profile {candidateTerm} =
+  ProviderIntentAdmission.mk_policy_checked selected_profile {candidateTerm}
 
-let policy_witness : policy_checked_intent selected_profile {binding} =
-  mk_policy_checked selected_profile {binding}
+let provider_witness : ProviderIntentAdmission.provider_checked_intent selected_profile {candidateTerm} =
+  ProviderIntentAdmission.mk_provider_checked selected_profile {candidateTerm}
 
-let provider_witness : provider_checked_intent selected_profile {binding} =
-  mk_provider_checked selected_profile {binding}
-
-let admission_token_for_demo : admission_token selected_profile =
-  issue_admission_token selected_profile {binding} provider_witness
+let admission_token_for_demo : ProviderIntentAdmission.admission_token selected_profile =
+  ProviderIntentAdmission.issue_admission_token selected_profile {candidateTerm} provider_witness
 """
 
         moduleName, text

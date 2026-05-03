@@ -1,10 +1,13 @@
 module BroadcastProviderDemo.FailPolicy
 
-open BroadcastProviderDemo
+open ProviderIntentAdmission
+open TmForumTr292CommonCore
 
-let unsafe_policy_intent : tm_intent =
+let unsafe_policy_intent : raw_tm_intent =
   { intent_name = "DetroitStadiumBroadcastPolicyFailure";
-    venue = Some DetroitStadium;
+    scenario_family = BroadcastFamily;
+    target_name = Some "Detroit Stadium";
+    target_kind = Some VenueTarget;
     service_class = Some "premium-5g-broadcast";
     event_month = Some "April";
     event_day = Some 25;
@@ -12,15 +15,17 @@ let unsafe_policy_intent : tm_intent =
     start_hour = Some 18;
     end_hour = Some 22;
     timezone = Some "America/Detroit";
-    device_count = Some 200;
-    max_uplink_latency_ms = Some 20;
+    primary_device_count = Some 200;
+    auxiliary_endpoint_count = None;
+    max_latency_ms = Some 20;
     reporting_interval_minutes = Some 60;
     immediate_degradation_alerts = true;
+    safety_policy_declared = true;
     preserve_emergency_traffic = false;
     request_public_safety_preemption = true }
 
 let selected_profile : profile =
-  LiveBroadcastGold
+  resolve_profile unsafe_policy_intent
 
 let measurable : measurable_intent unsafe_policy_intent =
   mk_measurable unsafe_policy_intent

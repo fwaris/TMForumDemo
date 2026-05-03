@@ -1,10 +1,13 @@
 module BroadcastProviderDemo.FailTm
 
-open BroadcastProviderDemo
+open ProviderIntentAdmission
+open TmForumTr292CommonCore
 
-let vague_intent : tm_intent =
+let vague_intent : raw_tm_intent =
   { intent_name = "VagueBroadcastIntent";
-    venue = None;
+    scenario_family = BroadcastFamily;
+    target_name = None;
+    target_kind = None;
     service_class = None;
     event_month = None;
     event_day = None;
@@ -12,10 +15,12 @@ let vague_intent : tm_intent =
     start_hour = None;
     end_hour = None;
     timezone = None;
-    device_count = None;
-    max_uplink_latency_ms = None;
+    primary_device_count = None;
+    auxiliary_endpoint_count = None;
+    max_latency_ms = None;
     reporting_interval_minutes = None;
     immediate_degradation_alerts = false;
+    safety_policy_declared = false;
     preserve_emergency_traffic = false;
     request_public_safety_preemption = false }
 

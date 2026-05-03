@@ -1,10 +1,13 @@
 module BroadcastProviderDemo.FailLatency
 
-open BroadcastProviderDemo
+open ProviderIntentAdmission
+open TmForumTr292CommonCore
 
-let low_latency_intent : tm_intent =
+let low_latency_intent : raw_tm_intent =
   { intent_name = "DetroitStadiumBroadcastLatencyFailure";
-    venue = Some DetroitStadium;
+    scenario_family = BroadcastFamily;
+    target_name = Some "Detroit Stadium";
+    target_kind = Some VenueTarget;
     service_class = Some "premium-5g-broadcast";
     event_month = Some "April";
     event_day = Some 25;
@@ -12,15 +15,17 @@ let low_latency_intent : tm_intent =
     start_hour = Some 18;
     end_hour = Some 22;
     timezone = Some "America/Detroit";
-    device_count = Some 200;
-    max_uplink_latency_ms = Some 5;
+    primary_device_count = Some 200;
+    auxiliary_endpoint_count = None;
+    max_latency_ms = Some 5;
     reporting_interval_minutes = Some 60;
     immediate_degradation_alerts = true;
+    safety_policy_declared = true;
     preserve_emergency_traffic = true;
     request_public_safety_preemption = false }
 
 let selected_profile : profile =
-  LiveBroadcastGold
+  resolve_profile low_latency_intent
 
 let measurable : measurable_intent low_latency_intent =
   mk_measurable low_latency_intent

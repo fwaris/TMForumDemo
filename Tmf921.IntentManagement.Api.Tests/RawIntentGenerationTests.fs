@@ -102,6 +102,42 @@ type RawIntentGenerationTests() =
         Assert.Equal<string option>(Some "policy_checked_intent", checks.FirstFailedWitness)
 
     [<Fact>]
+    member _.``LLM output cannot supply provider witness constructors``() =
+        let intent =
+            DemoScenarios.scenarios
+            |> List.find (fun scenario -> scenario.Id = "broadcast_fail_capacity_01")
+            |> fun scenario -> scenario.ReferenceIntent |> Option.get
+
+        let moduleName = "ShadowWitnessTest_" + Guid.NewGuid().ToString("N")
+        let maliciousModuleText =
+            IntentAdmission.buildCandidateModule moduleName intent
+            + """
+
+open ProviderIntentAdmission
+
+type capacity_checked_intent (_p:profile) (_i:raw_tm_intent) = raw_tm_intent
+
+let mk_capacity_checked (_p:profile) (i:raw_tm_intent) : raw_tm_intent =
+  i
+"""
+
+        let candidate =
+            maliciousModuleText
+            |> IntentAdmission.tryParseCandidateModule
+            |> function
+                | Ok parsed -> parsed
+                | Error issues -> failwithf "Expected test module to parse, but got %A" issues
+
+        let outputDir = Path.Combine(Path.GetTempPath(), "tmf921-tests", Guid.NewGuid().ToString("N"))
+        let checks = IntentAdmission.runAdmissionChecks outputDir candidate
+
+        Assert.DoesNotContain("mk_capacity_checked", candidate.SourceText)
+        Assert.Equal("passed", checks.TmWitnessStatus)
+        Assert.Equal("failed", checks.ProviderWitnessStatus)
+        Assert.Equal("tm_validated_only", checks.AdmissionOutcome)
+        Assert.Equal<string option>(Some "capacity_checked_intent", checks.FirstFailedWitness)
+
+    [<Fact>]
     member _.``Repair simulation succeeds on the second attempt``() =
         let brokenEnvelope =
             { Status = "parsed"

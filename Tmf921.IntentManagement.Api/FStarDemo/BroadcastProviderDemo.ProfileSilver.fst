@@ -1,10 +1,13 @@
 module BroadcastProviderDemo.ProfileSilver
 
-open BroadcastProviderDemo
+open ProviderIntentAdmission
+open TmForumTr292CommonCore
 
-let silver_profile_intent : tm_intent =
+let silver_profile_intent : raw_tm_intent =
   { intent_name = "MetroArenaProfileSilver";
-    venue = Some MetroArena;
+    scenario_family = BroadcastFamily;
+    target_name = Some "Metro Arena";
+    target_kind = Some VenueTarget;
     service_class = Some "premium-5g-broadcast";
     event_month = Some "April";
     event_day = Some 25;
@@ -12,15 +15,17 @@ let silver_profile_intent : tm_intent =
     start_hour = Some 18;
     end_hour = Some 22;
     timezone = Some "America/Detroit";
-    device_count = Some 90;
-    max_uplink_latency_ms = Some 30;
+    primary_device_count = Some 90;
+    auxiliary_endpoint_count = None;
+    max_latency_ms = Some 30;
     reporting_interval_minutes = Some 60;
     immediate_degradation_alerts = true;
+    safety_policy_declared = true;
     preserve_emergency_traffic = true;
     request_public_safety_preemption = false }
 
 let selected_profile : profile =
-  LiveBroadcastSilver
+  resolve_profile silver_profile_intent
 
 let measurable : measurable_intent silver_profile_intent =
   mk_measurable silver_profile_intent
